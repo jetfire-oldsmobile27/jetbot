@@ -1,0 +1,75 @@
+2025-07-12 00:31:23,963 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getMe "HTTP/1.1 200 OK"
+2025-07-12 00:31:24,065 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/deleteWebhook "HTTP/1.1 200 OK"
+2025-07-12 00:31:24,065 - Application started
+2025-07-12 00:31:34,507 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-12 00:31:44,642 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-12 00:31:45,257 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-12 00:31:53,959 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-12 00:31:53,960 - 🔓 Доступ выдан: Jetfire_Oldsmobile (ID: 651986978)
+2025-07-12 00:31:54,471 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/sendMessage "HTTP/1.1 200 OK"
+2025-07-12 00:32:04,094 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-12 00:32:05,425 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-12 00:32:05,916 - 📸 Фото отправлено пользователю Jetfire_Oldsmobile (ID: 651986978) в 2025-07-12 00:32:05
+2025-07-12 00:32:06,821 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/sendPhoto "HTTP/1.1 200 OK"
+2025-07-12 00:32:16,073 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-12 00:32:26,208 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-12 00:32:36,344 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-12 00:32:44,263 - Application is stopping. This might take a moment.
+2025-07-12 00:32:44,264 - Application.stop() complete
+2025-07-12 01:48:52,374 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getMe "HTTP/1.1 200 OK"
+2025-07-12 01:48:52,682 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/deleteWebhook "HTTP/1.1 200 OK"
+2025-07-12 01:48:52,683 - Application started
+2025-07-12 01:48:58,518 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-12 01:48:58,520 - ❌ Несанкционированный доступ: Jetfire_Oldsmobile (ID: 651986978)
+2025-07-12 01:48:59,031 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/sendMessage "HTTP/1.1 200 OK"
+2025-07-12 01:49:01,795 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-12 01:49:01,796 - 🔓 Доступ выдан: Jetfire_Oldsmobile (ID: 651986978)
+2025-07-12 01:49:01,897 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/sendMessage "HTTP/1.1 200 OK"
+2025-07-12 01:49:04,048 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-12 01:49:04,481 - 📸 Фото отправлено пользователю Jetfire_Oldsmobile (ID: 651986978) в 2025-07-12 01:49:04
+2025-07-12 01:49:04,783 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/sendPhoto "HTTP/1.1 200 OK"
+2025-07-12 01:49:08,450 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-12 01:49:08,884 - 📸 Фото отправлено пользователю Jetfire_Oldsmobile (ID: 651986978) в 2025-07-12 01:49:08
+2025-07-12 01:49:09,123 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/sendPhoto "HTTP/1.1 200 OK"
+2025-07-12 01:49:18,998 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-12 01:49:20,928 - Application is stopping. This might take a moment.
+2025-07-12 01:49:20,928 - Application.stop() complete
+2025-07-13 18:25:23,556 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getMe "HTTP/1.1 200 OK"
+2025-07-13 18:25:23,657 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/deleteWebhook "HTTP/1.1 200 OK"
+2025-07-13 18:25:23,658 - Application started
+2025-07-13 18:25:29,905 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:25:29,906 - ❌ Несанкционированный доступ: Jetfire_Oldsmobile (ID: 651986978)
+2025-07-13 18:25:30,333 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/sendMessage "HTTP/1.1 200 OK"
+2025-07-13 18:25:39,977 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:25:40,912 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:25:40,913 - 🔓 Доступ выдан: Jetfire_Oldsmobile (ID: 651986978)
+2025-07-13 18:25:41,357 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/sendMessage "HTTP/1.1 200 OK"
+2025-07-13 18:25:43,145 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:25:43,576 - 📸 Фото отправлено пользователю Jetfire_Oldsmobile (ID: 651986978) в 2025-07-13 18:25:43
+2025-07-13 18:25:43,856 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/sendPhoto "HTTP/1.1 200 OK"
+2025-07-13 18:25:51,736 - Application is stopping. This might take a moment.
+2025-07-13 18:25:51,736 - Application.stop() complete
+2025-07-13 18:26:23,302 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getMe "HTTP/1.1 200 OK"
+2025-07-13 18:26:23,364 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/deleteWebhook "HTTP/1.1 200 OK"
+2025-07-13 18:26:23,365 - Application started
+2025-07-13 18:26:33,586 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:26:43,651 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:26:53,713 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:27:03,779 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:27:13,843 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:27:23,908 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:27:34,015 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:27:44,153 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:27:54,291 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:28:04,429 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:28:14,494 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:28:24,560 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:28:34,638 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:28:44,781 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:28:54,848 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:29:04,948 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:29:15,013 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:29:25,224 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:29:35,289 - HTTP Request: POST https://api.telegram.org/bot7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs/getUpdates "HTTP/1.1 200 OK"
+2025-07-13 18:29:43,721 - Application is stopping. This might take a moment.
+2025-07-13 18:29:43,721 - Application.stop() complete
