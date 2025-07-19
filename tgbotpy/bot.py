@@ -132,45 +132,48 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("⛔ Доступ к боту разрешён только одному пользователю.")
 
 async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Сделать фото с камерой"""
     global authorized_user_id
     user = update.effective_user
     username = user.username or "unknown"
     user_id = user.id
-    
+
     if user_id != authorized_user_id:
         logging.warning(f"❌ Несанкционированный доступ: {username} (ID: {user_id})")
         await update.message.reply_text("⛔ У вас нет доступа к этой функции.")
         return
-    
-    cam = cv2.VideoCapture(0)
-    if not cam.isOpened():
-        await update.message.reply_text("Не удалось открыть веб-камеру.")
+
+    for cam_index in range(-1, 7):  
+        cam = cv2.VideoCapture(cam_index)
+        if cam.isOpened():
+            logging.info(f"📷 Используется камера с индексом: {cam_index}")
+            break
+    else:
+        await update.message.reply_text("⚠️ Не удалось открыть веб-камеру.")
         return
-    
-    for _ in range(2):
+
+    for _ in range(3):
         ret, frame = cam.read()
-        if not ret:
+        if not ret or frame is None:
             cam.release()
-            await update.message.reply_text("Не удалось захватить изображение.")
+            await update.message.reply_text("❌ Не удалось захватить изображение.")
             return
-    
+
     cam.release()
-    
+
     lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     cl = clahe.apply(l)
     limg = cv2.merge((cl, a, b))
     enhanced = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
-    
+
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
         cv2.imwrite(tmp.name, enhanced)
         tmp_path = tmp.name
-    
+
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logging.info(f"📸 Фото отправлено пользователю {username} (ID: {user_id}) в {timestamp}")
-    
+
     try:
         with open(tmp_path, "rb") as img:
             await update.message.reply_photo(photo=img)
