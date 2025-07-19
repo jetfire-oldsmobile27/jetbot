@@ -13,21 +13,17 @@ from telegram.ext import (
 )
 from pathlib import Path
 
-# Загрузка токена
 BOT_TOKEN = open((Path(__file__).parent.parent / "token.txt"), "r", encoding="utf-8").read().strip()
 LOG_FILE = os.path.join(os.path.dirname(__file__), 'bot.log')
 
-# Настройка логирования
 logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
     format="%(asctime)s - %(message)s"
 )
 
-# Глобальные переменные
 authorized_user_id = None
 
-# === Новые команды из C++ ===
 
 async def cpuinfo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Отправляет содержимое /proc/cpuinfo"""
@@ -49,7 +45,6 @@ async def temp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Отправляет температуру с датчиков"""
     report = []
     
-    # Проверяем thermal_zone
     thermal_dir = "/sys/class/thermal"
     if os.path.exists(thermal_dir):
         for entry in os.listdir(thermal_dir):
@@ -70,7 +65,6 @@ async def temp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     except:
                         report.append(f"[{entry}] {type_str}: invalid ({temp_str})")
     
-    # Проверяем hwmon
     hwmon_dir = "/sys/class/hwmon"
     if os.path.exists(hwmon_dir):
         for entry in os.listdir(hwmon_dir):
@@ -149,13 +143,11 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("⛔ У вас нет доступа к этой функции.")
         return
     
-    # Открываем камеру
     cam = cv2.VideoCapture(0)
     if not cam.isOpened():
         await update.message.reply_text("Не удалось открыть веб-камеру.")
         return
     
-    # Делаем два кадра: первый - прогревочный
     for _ in range(2):
         ret, frame = cam.read()
         if not ret:
@@ -165,7 +157,6 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     
     cam.release()
     
-    # Автокоррекция яркости и контраста
     lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -173,16 +164,13 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     limg = cv2.merge((cl, a, b))
     enhanced = cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
     
-    # Сохраняем изображение
     with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
         cv2.imwrite(tmp.name, enhanced)
         tmp_path = tmp.name
     
-    # Логируем фото-запрос
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     logging.info(f"📸 Фото отправлено пользователю {username} (ID: {user_id}) в {timestamp}")
     
-    # Отправляем фото
     try:
         with open(tmp_path, "rb") as img:
             await update.message.reply_photo(photo=img)
@@ -193,14 +181,12 @@ def main() -> None:
     """Запуск бота"""
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     
-    # Добавляем обработчики команд
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("photo", photo))
     app.add_handler(CommandHandler("cpuinfo", cpuinfo))
     app.add_handler(CommandHandler("temp", temp))
     app.add_handler(CommandHandler("logs", logs))
     
-    # Запускаем бота
     app.run_polling()
 
 if __name__ == "__main__":
