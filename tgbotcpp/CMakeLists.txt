@@ -4,7 +4,7 @@ project(telegram_camera_bot LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm.*|aarch64|AArch64")
+if(CMAKE_VS_PLATFORM_TOOLSET_HOST_ARCHITECTURE MATCHES ARM64)
     set(ON_SBC TRUE)
     message(STATUS "Platform: Single-board computer (ARM-based)")
 else()

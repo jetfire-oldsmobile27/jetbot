@@ -1,6 +1,3 @@
 {
-    "files.associations": {
-        "xstring": "cpp"
-    },
-    "cmake.sourceDirectory": "/home/jetpclaptop/workspace/projects/jetbot/tgbotcpp"
+    "cmake.sourceDirectory": "W:/workspace/projects/jetbot/tgbotcpp"
 }
