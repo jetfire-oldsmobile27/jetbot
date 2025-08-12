@@ -13,6 +13,8 @@
 #     libboost-system-dev \
 #     libcurl4-openssl-dev \
 #     libpthread-stubs0-dev
+#echo "deb http://deb.debian.org/debian bookworm-backports main contrib non-free" | sudo tee /etc/apt/sources.list.d/backports.list
+#sudo apt install -t bookworm-backports libboost1.83-all-dev libboost-json1.83-dev libboost-system1.83-dev libboost-regex1.83-dev
 #
 # =============================================================================
 # Рекомендуется установить TgBot++ вручную из исходников:
