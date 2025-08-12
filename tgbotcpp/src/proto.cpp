@@ -29,7 +29,18 @@ namespace json = boost::json;
 // Конфигурационные параметры
 const int WIDTH = 800;
 const int HEIGHT = 600;
-const int CAMERA_INDEX = 0;
+const int CAMERA_INDEX = []() -> int {
+    const char* env = std::getenv("CAM_INDEX");
+    if (env && std::strlen(env) > 0) {
+        try {
+            return std::stoi(env);
+        } catch (const std::exception& e) {
+            std::cerr << "Invalid CAM_INDEX value: " << env 
+                      << " (using default: 0). Error: " << e.what() << std::endl;
+        }
+    }
+    return 0;
+}();
 const int FPS = 25;
 const float CONF_THRESHOLD = 0.5;
 const float NMS_THRESHOLD = 0.4;
