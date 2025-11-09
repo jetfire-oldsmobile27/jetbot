@@ -1,18 +1,24 @@
 [settings]
 arch=armv8
 build_type=Release
-compiler=gcc
+compiler=clang
 compiler.cppstd=gnu17
 compiler.libcxx=libstdc++11
-compiler.version=13
+compiler.version=20
 os=Linux
 [options]
 */*:shared=False
 [tool_requires]
 *: cmake/3.29.7
 [conf]
+tools.build:sysroot=/home/wolfdale/workspace/projects/jetbot/tgbotcpp/sysroots/debian_arm64_bookworm
 tools.build:compiler_executables={'c': '/usr/bin/aarch64-linux-gnu-gcc', 'cpp': '/usr/bin/aarch64-linux-gnu-g++', 'ar': '/usr/bin/aarch64-linux-gnu-ar', 'ld': '/usr/bin/aarch64-linux-gnu-ld', 'fortran': '/usr/bin/aarch64-linux-gnu-fortran'}
 tools.build:verbosity=quiet
+tools.cmake.cmaketoolchain:user_toolchain=['/home/wolfdale/workspace/projects/jetbot/tgbotcpp/user_toolchain.cmake']
+tools.cmake.cmaketoolchain:system_name="Linux"
+tools.cmake.cmaketoolchain:system_processor="aarch64"
 tools.cmake.cmaketoolchain:generator=Ninja
 tools.compilation:verbosity=quiet
+tools.system.package_manager:mode=report-installed
 tools.system.package_manager:sudo=true
+

@@ -1,9 +1,11 @@
 [requires]
-opencv/4.11.0
+opencv/4.12.0
 tgbot/1.8
 
 [options]
 opencv/*:with_v4l=True
+opencv/*:with_ffmpeg=False
+xkbcommon/*:with_x11=False
 
 [generators]
 CMakeToolchain

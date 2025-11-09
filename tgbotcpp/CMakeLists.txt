@@ -11,7 +11,7 @@ message(STATUS "OpenCV LIBS = ${OpenCV_LIBS}")
 add_executable(${PROJECT_NAME} src/proto.cpp)
 
 if(ON_SBC)
-    message(STATUS "Platform: Single-board computer (ARM-based)")
+    message(STATUS "Platform build: Single-board computer (ARM-based)")
     find_package(Threads REQUIRED)
     find_package(OpenSSL REQUIRED)
     set(Boost_NO_WARN_NEW_VERSIONS ON)
@@ -47,6 +47,7 @@ else()
     target_link_libraries(${PROJECT_NAME} PRIVATE
         tgbot::tgbot
         ${OpenCV_LIBS}
+        -static-libstdc++
     )
     include_directories(${OpenCV_INCLUDE_DIRS})
 endif()
