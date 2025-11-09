@@ -3,3 +3,4 @@ build
 token*
 CMake*.json
 bot.log
+sysroots
