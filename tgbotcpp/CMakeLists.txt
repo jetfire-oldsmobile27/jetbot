@@ -5,10 +5,28 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+file(GLOB_RECURSE PROJECT_SOURCES
+    ${CMAKE_SOURCE_DIR}/Utility/*.cpp
+    ${CMAKE_SOURCE_DIR}/ObserverLoop/*.cpp
+)
+
+function(add_all_include_directories base_dir)
+    file(GLOB children RELATIVE ${base_dir} ${base_dir}/*)
+    foreach(child ${children})
+        if(IS_DIRECTORY ${base_dir}/${child})
+            target_include_directories(${PROJECT_NAME} PRIVATE ${base_dir}/${child})
+            add_all_include_directories(${base_dir}/${child})
+        endif()
+    endforeach()
+endfunction()
+
 find_package(OpenCV REQUIRED)
 message(STATUS "OpenCV LIBS = ${OpenCV_LIBS}")
 
-add_executable(${PROJECT_NAME} src/proto.cpp)
+add_executable(${PROJECT_NAME} ${PROJECT_SOURCES} src/proto.cpp)
+
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR})
+add_all_include_directories(${CMAKE_SOURCE_DIR})
 
 if(ON_SBC)
     message(STATUS "Platform build: Single-board computer (ARM-based)")
@@ -16,19 +34,7 @@ if(ON_SBC)
     find_package(OpenSSL REQUIRED)
     set(Boost_NO_WARN_NEW_VERSIONS ON)
     find_package(Boost 1.83 REQUIRED COMPONENTS system regex json container)
-    find_package(Boost COMPONENTS system REQUIRED)
     find_package(CURL REQUIRED)
-
-    include_directories(
-        ${OpenCV_INCLUDE_DIRS}
-        /usr/local/include
-        ${OPENSSL_INCLUDE_DIR}
-        ${Boost_INCLUDE_DIR}
-    )
-    if(CURL_FOUND)
-        include_directories(${CURL_INCLUDE_DIRS})
-        target_compile_definitions(${PROJECT_NAME} PRIVATE HAVE_CURL)
-    endif()
 
     target_link_libraries(${PROJECT_NAME} PRIVATE
         /usr/local/lib/libTgBot.a
@@ -49,7 +55,6 @@ else()
         ${OpenCV_LIBS}
         -static-libstdc++
     )
-    include_directories(${OpenCV_INCLUDE_DIRS})
 endif()
 
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
