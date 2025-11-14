@@ -25,6 +25,7 @@
 #include "Utility/Effects.hpp"
 #include "ObserverLoop/VideoRecorder.hpp"
 #include "Startup/StartupManager.hpp"
+#include "Tests/Test.hpp"
 
 
 // Конфигурационные параметры
@@ -609,6 +610,10 @@ int main() {
     // Определяем путь к исполняемому файлу
     resource_dir = Utility::Settings::GetResourceDirFromExePath();
 
+    //Тесты и выход
+    bool test_result = Tests::makeTests(CAMERA_INDEX);
+    std::cout << "Tests " << (test_result ? "passed" : "failed") << std::endl;
+    return test_result ? 0 : 1;
     
     // Инициализация путей
     jetbot_dir = std::string(getenv("HOME")) + "/jetbot";

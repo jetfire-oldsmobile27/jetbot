@@ -6,8 +6,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 file(GLOB_RECURSE PROJECT_SOURCES
-    ${CMAKE_SOURCE_DIR}/Utility/*.cpp
-    ${CMAKE_SOURCE_DIR}/ObserverLoop/*.cpp
+    ${CMAKE_SOURCE_DIR}/src/Utility/*.cpp
+    ${CMAKE_SOURCE_DIR}/src/Utility/thirdparty/*.cpp  
+    ${CMAKE_SOURCE_DIR}/src/ObserverLoop/*.cpp
+    ${CMAKE_SOURCE_DIR}/src/Startup/*.cpp
+    ${CMAKE_SOURCE_DIR}/src/Tests/*.cpp
 )
 
 function(add_all_include_directories base_dir)
@@ -23,10 +26,13 @@ endfunction()
 find_package(OpenCV REQUIRED)
 message(STATUS "OpenCV LIBS = ${OpenCV_LIBS}")
 
-add_executable(${PROJECT_NAME} ${PROJECT_SOURCES} src/proto.cpp)
+add_executable(${PROJECT_NAME} 
+    ${PROJECT_SOURCES}
+    src/proto.cpp  
+)
 
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR})
-add_all_include_directories(${CMAKE_SOURCE_DIR})
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_all_include_directories(${CMAKE_SOURCE_DIR}/src)
 
 if(ON_SBC)
     message(STATUS "Platform build: Single-board computer (ARM-based)")
@@ -50,9 +56,16 @@ if(ON_SBC)
 else()
     message(STATUS "Platform: x86/x86_64")
     find_package(tgbot CONFIG REQUIRED)
+    
+    set(Boost_NO_WARN_NEW_VERSIONS ON)
+    find_package(Boost 1.83 REQUIRED COMPONENTS system)
+    find_package(CURL REQUIRED)
+    
     target_link_libraries(${PROJECT_NAME} PRIVATE
         tgbot::tgbot
         ${OpenCV_LIBS}
+        Boost::boost
+        CURL::libcurl
         -static-libstdc++
     )
 endif()
