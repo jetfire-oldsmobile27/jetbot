@@ -1,0 +1,10 @@
+build/
+.cmake/
+.git/
+.gitignore
+*.swp
+*.swo
+*~
+CMakeLists.txt
+src/
+test-vision/

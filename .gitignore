@@ -4,3 +4,4 @@ token*
 CMake*.json
 bot.log
 sysroots
+bin

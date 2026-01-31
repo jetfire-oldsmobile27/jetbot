@@ -1,0 +1,25 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(gdb) Запустить telegram_camera_bot",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/tgbotcpp/build/telegram_camera_bot",
+            "args": [],
+            "stopAtEntry": true,
+            "cwd": "${workspaceFolder}/tgbotcpp",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/usr/bin/gdb",
+            "setupCommands": [
+                {
+                    "description": "Включить pretty-printing для gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        }
+    ]
+}

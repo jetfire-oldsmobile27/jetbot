@@ -1,3 +1,4 @@
 {
-    "cmake.sourceDirectory": "/home/wolfdale/workspace/projects/jetbot/tgbotcpp"
+    "cmake.sourceDirectory": "${workspaceFolder}/tgbotcpp",
+    "cmake.buildDirectory": "${workspaceFolder}/tgbotcpp/build"
 }

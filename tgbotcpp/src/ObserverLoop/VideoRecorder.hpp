@@ -1,102 +1,186 @@
 #include <iostream>
 #include <mutex>
 #include <opencv2/opencv.hpp>
-#include <opencv2/videoio.hpp>
 #include <string>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
+#include <filesystem>
 
 namespace ObserverLoop {
 
 class VideoRecorder {
 private:
     mutable std::mutex video_mutex;
+    std::string video_dir_;
+    cv::VideoWriter writer_;
+    std::string current_video_path_;
+    std::chrono::steady_clock::time_point segment_start_time_;
+    static constexpr int SEGMENT_DURATION_SEC = 300; // 5 минут
+    
+    cv::Size frame_size_;
+    bool use_mjpg_;
+
+    std::string generateFilename(const std::string& prefix = "segment") {
+        auto now = std::chrono::system_clock::now();
+        std::time_t now_c = std::chrono::system_clock::to_time_t(now);
+        std::tm now_tm = *std::localtime(&now_c);
+        
+        std::ostringstream oss;
+        oss << std::put_time(&now_tm, "%Y%m%d_%H%M%S");
+        
+        // Создаем подпапку по дате
+        std::string date_folder;
+        std::ostringstream date_oss;
+        date_oss << std::put_time(&now_tm, "%Y%m%d");
+        date_folder = date_oss.str();
+        
+        std::filesystem::path full_dir = std::filesystem::path(video_dir_) / date_folder;
+        std::filesystem::create_directories(full_dir);
+        
+        return (full_dir / (prefix + "_" + oss.str() + ".avi")).string();
+    }
+
+    bool openWriter(const cv::Size& frame_size) {
+        // Пробуем разные кодеки в порядке надежности
+        std::vector<std::pair<std::string, int>> codecs_to_try = {
+            {"MJPG", cv::VideoWriter::fourcc('M', 'J', 'P', 'G')},
+            {"XVID", cv::VideoWriter::fourcc('X', 'V', 'I', 'D')},
+            {"DIVX", cv::VideoWriter::fourcc('D', 'I', 'V', 'X')},
+            {"I420", cv::VideoWriter::fourcc('I', '4', '2', '0')} // YUV, самый надежный
+        };
+        
+        for (const auto& [codec_name, fourcc_val] : codecs_to_try) {
+            writer_.open(current_video_path_, fourcc_val, 25.0, frame_size);
+            if (writer_.isOpened()) {
+                std::cout << "✅ Кодек " << codec_name << " успешно открыт для записи: " 
+                          << current_video_path_ << std::endl;
+                use_mjpg_ = (codec_name == "MJPG");
+                return true;
+            }
+        }
+        
+        // Если ни один кодек не сработал, пробуем без указания кодека
+        writer_.open(current_video_path_, cv::CAP_ANY, 25.0, frame_size);
+        if (writer_.isOpened()) {
+            std::cout << "⚠️  Запись открыта с кодеком по умолчанию: " 
+                      << current_video_path_ << std::endl;
+            return true;
+        }
+        
+        std::cerr << "❌ Не удалось открыть VideoWriter ни с одним кодеком!" << std::endl;
+        return false;
+    }
+
 public:
-  VideoRecorder(const std::string &video_dir)
-      : video_dir_(video_dir), current_date_("") {}
-  ~VideoRecorder() { stopRecording(); }
-
-  void startRecording() {
-    std::lock_guard<std::mutex> lock(video_mutex);
-    if (writer_.isOpened())
-      return;
-
-    std::chrono::time_point now = std::chrono::system_clock::now();
-    time_t now_c = std::chrono::system_clock::to_time_t(now);
-    tm now_tm = *std::localtime(&now_c);
-    char buf[20];
-    strftime(buf, sizeof(buf), "%Y%m%d", &now_tm);
-    current_date_ = buf;
-
-    std::string filename = video_dir_ + "/" + current_date_ + ".mp4";
-    writer_.open(filename, cv::VideoWriter::fourcc('a', 'v', 'c', '1'), 25.0,
-                 cv::Size(640, 480));
-
-    if (!writer_.isOpened()) {
-      writer_.open(filename, cv::VideoWriter::fourcc('m', 'p', '4', 'v'), 25.0,
-                   cv::Size(640, 480));
+    VideoRecorder(const std::string &video_dir) 
+        : video_dir_(video_dir), 
+          frame_size_(640, 480),
+          use_mjpg_(false),
+          segment_start_time_(std::chrono::steady_clock::now()) {
+        
+        // Создаем основную директорию
+        std::filesystem::create_directories(video_dir_);
+    }
+    
+    ~VideoRecorder() { 
+        stopRecording(); 
     }
 
-    if (!writer_.isOpened()) {
-      std::cerr << "Не удалось открыть VideoWriter для записи: " << filename
-                << std::endl;
-    }
-  }
-
-  void stopRecording() {
-    std::lock_guard<std::mutex> lock(video_mutex);
-    if (writer_.isOpened()) {
-      writer_.release();
-    }
-  }
-
-  void writeFrame(const cv::Mat &frame) {
-    std::lock_guard<std::mutex> lock(video_mutex);
-    if (!writer_.isOpened())
-      return;
-
-    auto now = std::chrono::system_clock::now();
-    time_t now_c = std::chrono::system_clock::to_time_t(now);
-    tm now_tm = *std::localtime(&now_c);
-    char buf[20];
-    strftime(buf, sizeof(buf), "%Y%m%d", &now_tm);
-    std::string today = buf;
-
-    if (today != current_date_) {
-      writer_.release();
-      current_date_ = today;
-      std::string filename = video_dir_ + "/" + current_date_ + ".mp4";
-      writer_.open(filename, cv::VideoWriter::fourcc('a', 'v', 'c', '1'), 25.0,
-                   cv::Size(640, 480));
-
-      if (!writer_.isOpened()) {
-        writer_.open(filename, cv::VideoWriter::fourcc('m', 'p', '4', 'v'),
-                     25.0, cv::Size(640, 480));
-      }
+    void startRecording(const cv::Size& frame_size = cv::Size(640, 480)) {
+        std::lock_guard<std::mutex> lock(video_mutex);
+        
+        if (writer_.isOpened()) {
+            return;
+        }
+        
+        frame_size_ = frame_size;
+        current_video_path_ = generateFilename();
+        
+        if (!openWriter(frame_size)) {
+            std::cerr << "ОШИБКА: Не удалось начать запись!" << std::endl;
+            return;
+        }
+        
+        segment_start_time_ = std::chrono::steady_clock::now();
+        std::cout << "🎥 Начата запись: " << current_video_path_ << std::endl;
     }
 
-    cv::Mat resized;
-    cv::resize(frame, resized, cv::Size(640, 480));
-    writer_ << resized;
-  }
+    void writeFrame(const cv::Mat &frame) {
+        std::lock_guard<std::mutex> lock(video_mutex);
+        
+        if (!writer_.isOpened()) {
+            return;
+        }
+        
+        // Проверяем размер кадра
+        if (frame.size() != frame_size_) {
+            cv::Mat resized;
+            cv::resize(frame, resized, frame_size_);
+            writer_.write(resized);
+        } else {
+            writer_.write(frame);
+        }
+        
+        // Проверяем, не пора ли начать новый сегмент
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+            now - segment_start_time_).count();
+        
+        if (elapsed >= SEGMENT_DURATION_SEC) {
+            // Закрываем текущий файл и начинаем новый
+            std::string old_path = current_video_path_;
+            writer_.release();
+            
+            std::cout << "🔄 Завершен сегмент: " << old_path 
+                      << " (длительность: " << elapsed << "сек)" << std::endl;
+            
+            startRecording(frame_size_);
+        }
+    }
 
-  bool isRecording() const {
-    std::lock_guard<std::mutex> lock(video_mutex);
-    return writer_.isOpened();
-  }
+    void stopRecording() {
+        std::lock_guard<std::mutex> lock(video_mutex);
+        if (writer_.isOpened()) {
+            writer_.release();
+            std::cout << "⏹️  Запись завершена: " << current_video_path_ << std::endl;
+        }
+    }
 
-  std::string getCurrentVideoPath() const {
-    std::lock_guard<std::mutex> lock(video_mutex);
-    if (current_date_.empty())
-      return "";
-    return video_dir_ + "/" + current_date_ + ".mp4";
-  }
+    bool isRecording() const {
+        std::lock_guard<std::mutex> lock(video_mutex);
+        return writer_.isOpened();
+    }
 
-  std::string getVideoPathForDate(const std::string &date) const {
-    return video_dir_ + "/" + date + ".mp4";
-  }
+    std::string getCurrentVideoPath() const {
+        std::lock_guard<std::mutex> lock(video_mutex);
+        return current_video_path_;
+    }
 
-private:
-  std::string video_dir_;
-  cv::VideoWriter writer_;
-  std::string current_date_;
+    std::string getVideoPathForDate(const std::string &date) const {
+        // Ищем последний файл в папке с указанной датой
+        std::filesystem::path date_dir = std::filesystem::path(video_dir_) / date;
+        
+        if (!std::filesystem::exists(date_dir)) {
+            return "";
+        }
+        
+        // Находим самый свежий файл
+        std::string latest_file;
+        std::filesystem::file_time_type latest_time;
+        
+        for (const auto& entry : std::filesystem::directory_iterator(date_dir)) {
+            if (entry.path().extension() == ".avi" || entry.path().extension() == ".mp4") {
+                auto write_time = std::filesystem::last_write_time(entry);
+                if (latest_file.empty() || write_time > latest_time) {
+                    latest_file = entry.path().string();
+                    latest_time = write_time;
+                }
+            }
+        }
+        
+        return latest_file;
+    }
 };
-}; // namespace ObserverLoop
+} // namespace ObserverLoop

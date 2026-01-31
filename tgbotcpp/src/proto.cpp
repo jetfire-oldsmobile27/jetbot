@@ -29,8 +29,8 @@
 
 
 // Конфигурационные параметры
-const int WIDTH = 800;
-const int HEIGHT = 600;
+const int WIDTH = 640;
+const int HEIGHT = 480;
 const int CAMERA_INDEX = []() -> int {
     const char* env = std::getenv("CAM_INDEX");
     if (env && std::strlen(env) > 0) {
@@ -606,14 +606,17 @@ void video_processing_thread(TgBot::Bot* bot, ObserverLoop::VideoRecorder& recor
 int main() {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
+
+    
     
     // Определяем путь к исполняемому файлу
     resource_dir = Utility::Settings::GetResourceDirFromExePath();
 
     //Тесты и выход
-    bool test_result = Tests::makeTests(CAMERA_INDEX);
-    std::cout << "Tests " << (test_result ? "passed" : "failed") << std::endl;
-    return test_result ? 0 : 1;
+    
+    // bool test_result = Tests::makeTests(CAMERA_INDEX);
+    // std::cout << "Tests " << (test_result ? "passed" : "failed") << std::endl;
+    // return test_result ? 0 : 1;
     
     // Инициализация путей
     jetbot_dir = std::string(getenv("HOME")) + "/jetbot";
