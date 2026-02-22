@@ -20,6 +20,7 @@
 #include <vector>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <getopt.h>             // для парсинга аргументов
 
 #include "Utility/Settings.hpp"
 #include "Utility/Effects.hpp"
@@ -27,8 +28,74 @@
 #include "Startup/StartupManager.hpp"
 #include "Tests/Test.hpp"
 
+// ==================== Структура флагов конфигурации ====================
+struct ConfigFlags {
+    bool recording   = true;   // запись видео
+    bool detection   = true;   // детекция людей (YOLO)
+    bool effects     = true;   // визуальные эффекты (красный оттенок, кинескоп, дамп)
+    bool sound       = true;   // звук при обнаружении
+    bool cleanup     = true;   // очистка старых видео
+    bool animation   = true;   // анимация при старте
+    bool face        = true;   // детекция лиц
 
-// Конфигурационные параметры
+    bool help        = false;  // показать справку
+};
+
+// Глобальные атомарные флаги (для простоты доступа из потока)
+std::atomic<bool> flag_recording{true};
+std::atomic<bool> flag_detection{true};
+std::atomic<bool> flag_effects{true};
+std::atomic<bool> flag_sound{true};
+std::atomic<bool> flag_cleanup{true};
+std::atomic<bool> flag_animation{true};
+std::atomic<bool> flag_face{true};
+
+// ==================== Парсинг аргументов командной строки ====================
+void printHelp(const char* progname) {
+    std::cout << "Использование: " << progname << " [ОПЦИИ]\n"
+              << "Опции:\n"
+              << "  --no-recording      Отключить запись видео на диск\n"
+              << "  --no-detection       Отключить детекцию людей (YOLO)\n"
+              << "  --no-effects         Отключить визуальные эффекты (красный оттенок, кинескоп, дамп памяти)\n"
+              << "  --no-sound           Отключить звуковой сигнал при обнаружении\n"
+              << "  --no-cleanup         Отключить автоматическую очистку старых видео\n"
+              << "  --no-animation       Отключить анимацию при инициализации\n"
+              << "  --no-face            Отключить детекцию лиц\n"
+              << "  --help, -h           Показать эту справку\n";
+}
+
+ConfigFlags parseArgs(int argc, char* argv[]) {
+    ConfigFlags flags;
+    const struct option long_options[] = {
+        {"no-recording", no_argument, nullptr, 'r'},
+        {"no-detection",  no_argument, nullptr, 'd'},
+        {"no-effects",    no_argument, nullptr, 'e'},
+        {"no-sound",      no_argument, nullptr, 's'},
+        {"no-cleanup",    no_argument, nullptr, 'c'},
+        {"no-animation",  no_argument, nullptr, 'a'},
+        {"no-face",       no_argument, nullptr, 'f'},
+        {"help",          no_argument, nullptr, 'h'},
+        {nullptr, 0, nullptr, 0}
+    };
+
+    int opt;
+    while ((opt = getopt_long(argc, argv, "h", long_options, nullptr)) != -1) {
+        switch (opt) {
+            case 'r': flags.recording = false; break;
+            case 'd': flags.detection = false; break;
+            case 'e': flags.effects   = false; break;
+            case 's': flags.sound     = false; break;
+            case 'c': flags.cleanup   = false; break;
+            case 'a': flags.animation = false; break;
+            case 'f': flags.face      = false; break;
+            case 'h': flags.help      = true;  break;
+            default: break;
+        }
+    }
+    return flags;
+}
+
+// ==================== Остальные глобальные переменные ====================
 const int WIDTH = 640;
 const int HEIGHT = 480;
 const int CAMERA_INDEX = []() -> int {
@@ -49,11 +116,10 @@ const float NMS_THRESHOLD = 0.4;
 const int RECORDING_DURATION = 60;  // 60 секунд записи после обнаружения
 const int INITIAL_RECORDING_DURATION = 60;  // 60 секунд записи при старте
 
-// Глобальные переменные
 std::atomic<bool> running(true);
 std::atomic<bool> alert_enabled(true);
 std::atomic<bool> detection_active(false);
-std::atomic<bool> unstopable_mode(false);  // Новый режим непрерывной записи
+std::atomic<bool> unstopable_mode(false);
 std::atomic<int64_t> authorizedUserId(0);
 cv::Mat last_frame;
 std::mutex frame_mutex;
@@ -63,9 +129,9 @@ std::string jetbot_dir;
 std::string video_dir;
 std::string logs_dir;
 std::string settings_path;
-std::string resource_dir;  // Добавлено: путь к ресурсам
+std::string resource_dir;
 
-// Возвращает путь к лог-файлу на сегодня
+// ==================== Логирование и вспомогательные функции ====================
 std::filesystem::path getLogFilePath() {
     auto now = std::chrono::system_clock::now();
     auto t   = std::chrono::system_clock::to_time_t(now);
@@ -91,8 +157,8 @@ std::string readFile(const std::string &path) {
     return ss.str();
 }
 
-// Удаление файлов старше 30 дней
 void cleanupOldVideos() {
+    if (!flag_cleanup) return;   // проверка флага
     try {
         auto now = std::chrono::system_clock::now();
         auto thirty_days_ago = now - std::chrono::hours(24 * 30);
@@ -101,7 +167,6 @@ void cleanupOldVideos() {
             if (entry.path().extension() == ".mp4") {
                 auto ftime = std::filesystem::last_write_time(entry);
 
-                // Преобразуем file_time_type → system_clock::time_point
                 auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
                     ftime - decltype(ftime)::clock::now() + std::chrono::system_clock::now()
                 );
@@ -118,7 +183,7 @@ void cleanupOldVideos() {
     }
 }
 
-// Класс для трекинга объектов
+// ==================== Класс трекера (без изменений) ====================
 class ObjectTracker {
 public:
     ObjectTracker(int max_disappeared = 5) : next_id_(0), max_disappeared_(max_disappeared) {}
@@ -150,7 +215,6 @@ public:
         
         std::vector<bool> used_detections(detections.size(), false);
         
-        // Обновление существующих объектов
         for (auto& object : objects_) {
             int object_id = object.first;
             cv::Point centroid = object.second.first;
@@ -183,7 +247,6 @@ public:
             }
         }
         
-        // Регистрация новых объектов
         for (size_t i = 0; i < detections.size(); ++i) {
             if (!used_detections[i]) {
                 registerObject(detections[i].first, detections[i].second);
@@ -200,12 +263,15 @@ private:
     std::map<int, int> disappeared_;
 };
 
-// Оптимизированная детекция с помощью YOLO
+// ==================== Оптимизированная детекция YOLO ====================
 std::vector<std::pair<cv::Point, cv::Rect>> detectPeopleYolo(cv::Mat& frame, cv::dnn::Net& net, 
                                                            const std::vector<cv::String>& output_layers,
                                                            const std::vector<std::string>& classes,
                                                            float conf_threshold = 0.5, 
                                                            float nms_threshold = 0.4) {
+    // если детекция отключена глобально, возвращаем пустой вектор
+    if (!flag_detection) return {};
+
     int height = frame.rows;
     int width = frame.cols;
     std::vector<std::pair<cv::Point, cv::Rect>> people;
@@ -213,7 +279,6 @@ std::vector<std::pair<cv::Point, cv::Rect>> detectPeopleYolo(cv::Mat& frame, cv:
     std::vector<float> confidences;
     std::vector<cv::Rect> boxes;
     
-    // Создаем блоб с уменьшенным размером для ускорения
     cv::Mat blob;
     cv::dnn::blobFromImage(frame, blob, 1/255.0, cv::Size(320, 320), cv::Scalar(), true, false);
     net.setInput(blob);
@@ -262,38 +327,39 @@ std::vector<std::pair<cv::Point, cv::Rect>> detectPeopleYolo(cv::Mat& frame, cv:
     return people;
 }
 
-// Применение эффектов к кадру
+// ==================== Применение эффектов ====================
 cv::Mat applyEffects(cv::Mat& frame, cv::Mat& memory_dump) {
+    // если эффекты отключены, просто возвращаем исходный кадр
+    if (!flag_effects) {
+        return frame.clone();
+    }
+
     // 1. Применение красных оттенков
     cv::Mat processed;
     
     if (frame.channels() == 3) {
-        // Разделяем каналы
         std::vector<cv::Mat> channels;
         cv::split(frame, channels);
         
-        // Создаем матрицу только с красным каналом
         std::vector<cv::Mat> red_channels(3);
-        red_channels[0] = cv::Mat::zeros(frame.size(), CV_8UC1);  // Синий канал - нули
-        red_channels[1] = cv::Mat::zeros(frame.size(), CV_8UC1);  // Зеленый канал - нули
-        red_channels[2] = channels[2];  // Красный канал - из оригинала
+        red_channels[0] = cv::Mat::zeros(frame.size(), CV_8UC1);  // B
+        red_channels[1] = cv::Mat::zeros(frame.size(), CV_8UC1);  // G
+        red_channels[2] = channels[2];                            // R
         
         cv::Mat red_channel;
         cv::merge(red_channels, red_channel);
         
-        // Смешиваем с оригиналом
         cv::addWeighted(frame, 0.3, red_channel, 0.7, 0, processed);
     } else {
-        // Если изображение не трехканальное, просто копируем
         frame.copyTo(processed);
     }
     
-    // 2. Эффект кинескопа (только к видео)
+    // 2. Эффект кинескопа
     for (int i = 1; i < processed.rows; i += 2) {
         processed.row(i) = cv::Scalar(0, 0, 0);
     }
     
-    // 3. Конвертируем в BGRA для наложения прозрачности
+    // 3. Конвертация в BGRA
     cv::Mat processed_bgra;
     cv::cvtColor(processed, processed_bgra, cv::COLOR_BGR2BGRA);
     
@@ -317,58 +383,65 @@ cv::Mat applyEffects(cv::Mat& frame, cv::Mat& memory_dump) {
         }
     }
     
-    // 5. Конвертируем обратно в BGR
+    // 5. Обратно в BGR
     cv::Mat result;
     cv::cvtColor(processed_bgra, result, cv::COLOR_BGRA2BGR);
     
     return result;
 }
 
-// Обработчик сигналов
+// ==================== Обработчик сигналов ====================
 void signalHandler(int signal) {
     running = false;
 }
 
-// Функция обработки видео
-void video_processing_thread(TgBot::Bot* bot, ObserverLoop::VideoRecorder& recorder, Utility::Settings& settings) {
+// ==================== Функция обработки видео (с флагами) ====================
+void video_processing_thread(TgBot::Bot* bot, ObserverLoop::VideoRecorder& recorder, 
+                              Utility::Settings& settings, const ConfigFlags& flags) {
+    // Первоначальная очистка старых видео (с учётом флага)
     cleanupOldVideos();
     
     Startup::StartupManager startup_manager(WIDTH, HEIGHT);
     
-    std::thread init_thread([&]() {
+    // Анимация инициализации
+    if (flags.animation) {
+        std::thread init_thread([&]() {
+            startup_manager.initialize(resource_dir, CAMERA_INDEX, FPS);
+        });
+        init_thread.detach();
+
+        while (!startup_manager.isInitializationComplete() || startup_manager.getAnimationPhase() < 1) {
+            cv::Mat anim_frame = startup_manager.updateAnimation();
+            {
+                std::lock_guard<std::mutex> lock(frame_mutex);
+                anim_frame.copyTo(last_frame);
+            }
+            
+            // Запись видео, если разрешена
+            if (flags.recording && !recorder.isRecording()) {
+                recorder.startRecording();
+            }
+            
+            cv::Mat memory_dump = Utility::Effects::generateMemoryDump(WIDTH, HEIGHT);
+            cv::Mat processed_anim = flags.effects ? applyEffects(anim_frame, memory_dump) : anim_frame.clone();
+            if (flags.recording) {
+                recorder.writeFrame(processed_anim);
+            }
+            
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        }
+    } else {
+        // Если анимация отключена, просто инициализируем синхронно
         startup_manager.initialize(resource_dir, CAMERA_INDEX, FPS);
-    });
-    init_thread.detach(); // @todo
-    
-    auto system_start_time = std::chrono::steady_clock::now();
-    
-    while (!startup_manager.isInitializationComplete() || startup_manager.getAnimationPhase() < 1) {
-        cv::Mat anim_frame = startup_manager.updateAnimation();
-        {
-            std::lock_guard<std::mutex> lock(frame_mutex);
-            anim_frame.copyTo(last_frame);
-        }
-        
-        if (!recorder.isRecording()) {
-            recorder.startRecording();
-        }
-        
-        // Применяем эффекты к анимации инициализации перед записью
-        cv::Mat memory_dump = Utility::Effects::generateMemoryDump(WIDTH, HEIGHT);
-        cv::Mat processed_anim = applyEffects(anim_frame, memory_dump);
-        recorder.writeFrame(processed_anim);
-        
-        std::this_thread::sleep_for(std::chrono::milliseconds(30));
     }
     
-    // Получаем компоненты для обработки
+    // Получаем компоненты
     cv::VideoCapture& cap = startup_manager.getCapture();
     cv::dnn::Net net = startup_manager.getNet();
     std::vector<std::string> classes = startup_manager.getClasses();
     std::vector<cv::String> output_layers = startup_manager.getOutputLayers();
     cv::CascadeClassifier face_cascade = startup_manager.getFaceCascade();
     
-    // Инициализация трекера
     ObjectTracker tracker(3);
     int frame_counter = 0;
     double last_dump_time = 0.0;
@@ -376,6 +449,7 @@ void video_processing_thread(TgBot::Bot* bot, ObserverLoop::VideoRecorder& recor
     
     auto start_time = std::chrono::steady_clock::now();
     double last_detection_time = 0.0;
+    auto system_start_time = start_time;
     
     while (running) {
         if (!cap.isOpened()) {
@@ -400,44 +474,39 @@ void video_processing_thread(TgBot::Bot* bot, ObserverLoop::VideoRecorder& recor
         double current_time = std::chrono::duration<double>(loop_start - start_time).count();
         double system_uptime = std::chrono::duration<double>(loop_start - system_start_time).count();
         
-        // Подготовка кадра для отображения
         cv::Mat small_frame;
         cv::resize(frame, small_frame, cv::Size(640, 480));
         cv::Mat display_frame;
         cv::resize(small_frame, display_frame, cv::Size(WIDTH, HEIGHT));
         
-        // 1. Применение эффектов
-        cv::Mat processed = applyEffects(display_frame, memory_dump);
-        
-        // 2. Генерация дампа памяти раз в секунду
-        if (current_time - last_dump_time > 1.0) {
-            memory_dump = Utility::Effects::generateMemoryDump(WIDTH, HEIGHT);
-            last_dump_time = current_time;
+        // Эффекты (если включены)
+        cv::Mat processed;
+        if (flags.effects) {
+            if (current_time - last_dump_time > 1.0) {
+                memory_dump = Utility::Effects::generateMemoryDump(WIDTH, HEIGHT);
+                last_dump_time = current_time;
+            }
+            processed = applyEffects(display_frame, memory_dump);
+        } else {
+            processed = display_frame.clone();
         }
         
-        // 3. Детекция людей (используем YOLO только каждый 3-й кадр)
+        // Детекция людей
         std::vector<std::pair<cv::Point, cv::Rect>> detections;
-        if (frame_counter % 3 == 0 && !net.empty()) {
+        if (flags.detection && frame_counter % 3 == 0 && !net.empty()) {
             try {
-                detections = detectPeopleYolo(
-                    small_frame, 
-                    net, 
-                    output_layers, 
-                    classes,
-                    CONF_THRESHOLD,
-                    NMS_THRESHOLD
-                );
+                detections = detectPeopleYolo(small_frame, net, output_layers, classes,
+                                               CONF_THRESHOLD, NMS_THRESHOLD);
             } catch (const cv::Exception& e) {
                 std::cerr << "Ошибка детекции людей: " << e.what() << std::endl;
             }
         }
         
-        // 4. Обновляем трекер
         std::map<int, std::pair<cv::Point, cv::Rect>> tracked_objects = tracker.update(detections);
         
-        // 5. Детекция лиц
+        // Детекция лиц (если включена)
         std::vector<cv::Rect> detected_faces;
-        if (!face_cascade.empty() && !tracked_objects.empty()) {
+        if (flags.face && !face_cascade.empty() && !tracked_objects.empty()) {
             cv::Mat gray;
             cv::cvtColor(small_frame, gray, cv::COLOR_BGR2GRAY);
             
@@ -454,14 +523,7 @@ void video_processing_thread(TgBot::Bot* bot, ObserverLoop::VideoRecorder& recor
                 if (roi_h > 30 && roi_w > 30) {
                     cv::Mat roi = gray(cv::Rect(roi_x, roi_y, roi_w, roi_h));
                     std::vector<cv::Rect> faces;
-                    face_cascade.detectMultiScale(
-                        roi, 
-                        faces, 
-                        1.05,
-                        5,
-                        0,
-                        cv::Size(40, 40)
-                    );
+                    face_cascade.detectMultiScale(roi, faces, 1.05, 5, 0, cv::Size(40, 40));
                     
                     for (const auto& face : faces) {
                         detected_faces.push_back(cv::Rect(roi_x + face.x, roi_y + face.y, face.width, face.height));
@@ -470,13 +532,12 @@ void video_processing_thread(TgBot::Bot* bot, ObserverLoop::VideoRecorder& recor
             }
         }
         
-        // 6. Отрисовка результатов
+        // Отрисовка результатов
         for (const auto& obj : tracked_objects) {
             int object_id = obj.first;
             cv::Point centroid = obj.second.first;
             cv::Rect bbox = obj.second.second;
             
-            // Масштабирование координат
             int x = static_cast<int>(bbox.x * WIDTH / 640.0);
             int y = static_cast<int>(bbox.y * HEIGHT / 480.0);
             int w = static_cast<int>(bbox.width * WIDTH / 640.0);
@@ -486,10 +547,8 @@ void video_processing_thread(TgBot::Bot* bot, ObserverLoop::VideoRecorder& recor
                 static_cast<int>(centroid.y * HEIGHT / 480.0)
             );
             
-            // Рисуем контур человека
             cv::rectangle(processed, cv::Point(x, y), cv::Point(x + w, y + h), cv::Scalar(0, 0, 255), 2);
             
-            // Информационная панель
             if (w > 60 && h > 100) {
                 cv::rectangle(processed, cv::Point(x, y - 20), cv::Point(x + 100, y), cv::Scalar(0, 0, 0), -1);
                 std::random_device rd;
@@ -499,7 +558,6 @@ void video_processing_thread(TgBot::Bot* bot, ObserverLoop::VideoRecorder& recor
                            cv::Point(x, y - 5), cv::FONT_HERSHEY_PLAIN, 1, cv::Scalar(0, 255, 255), 1);
             }
             
-            // Перекрестие
             cv::line(processed, cv::Point(centroid.x - 15, centroid.y), cv::Point(centroid.x + 15, centroid.y), 
                     cv::Scalar(0, 255, 0), 1);
             cv::line(processed, cv::Point(centroid.x, centroid.y - 15), cv::Point(centroid.x, centroid.y + 15), 
@@ -521,13 +579,12 @@ void video_processing_thread(TgBot::Bot* bot, ObserverLoop::VideoRecorder& recor
                     cv::Scalar(0, 255, 0), 1);
         }
         
-        // 7. Звук обнаружения
-        // ВТОРАЯ ВАЖНАЯ ИЗМЕНЕНИЕ: добавляем звук обнаружения
-        if (!tracked_objects.empty() && frame_counter % 5 == 0) {
+        // Звук обнаружения (если включён)
+        if (flags.sound && !tracked_objects.empty() && frame_counter % 5 == 0) {
             Utility::Effects::playDetectSound();
         }
         
-        // 8. Информационный HUD
+        // Информационный HUD
         cv::rectangle(processed, cv::Point(WIDTH - 180, 10), cv::Point(WIDTH - 10, 70), cv::Scalar(0, 0, 0, 200), -1);
         double fps = 1.0 / (std::chrono::duration<double>(loop_start - start_time).count() + 0.001);
         cv::putText(processed, "TARGETS: " + std::to_string(tracked_objects.size()), 
@@ -535,53 +592,51 @@ void video_processing_thread(TgBot::Bot* bot, ObserverLoop::VideoRecorder& recor
         cv::putText(processed, "FPS: " + std::to_string(static_cast<int>(fps)), 
                    cv::Point(WIDTH - 170, 55), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 200, 255), 1);
         
-        // Обновляем last_frame
         {
             std::lock_guard<std::mutex> lock(frame_mutex);
             processed.copyTo(last_frame);
         }
         
-        // Запись видео при обнаружении людей
-        if (!tracked_objects.empty()) {
-            last_detection_time = current_time;
-            detection_active = true;
-            
-            if (!recorder.isRecording()) {
-                recorder.startRecording();
-                if (alert_enabled && authorizedUserId != 0) {
-                    std::string tmp_path = "/tmp/detection_alert.jpg";
-                    cv::imwrite(tmp_path, frame);
-                    try {
-                        bot->getApi().sendPhoto(authorizedUserId, 
-                            TgBot::InputFile::fromFile(tmp_path, "image/jpeg"),
-                            "Обнаружены люди в кадре");
-                    } catch (...) {
-                        logMsg("Ошибка отправки уведомления");
+        // Логика записи видео
+        if (flags.recording) {
+            if (!tracked_objects.empty()) {
+                last_detection_time = current_time;
+                detection_active = true;
+                
+                if (!recorder.isRecording()) {
+                    recorder.startRecording();
+                    if (alert_enabled && authorizedUserId != 0) {
+                        std::string tmp_path = "/tmp/detection_alert.jpg";
+                        cv::imwrite(tmp_path, frame);
+                        try {
+                            bot->getApi().sendPhoto(authorizedUserId, 
+                                TgBot::InputFile::fromFile(tmp_path, "image/jpeg"),
+                                "Обнаружены люди в кадре");
+                        } catch (...) {
+                            logMsg("Ошибка отправки уведомления");
+                        }
+                        std::filesystem::remove(tmp_path);
                     }
-                    std::filesystem::remove(tmp_path);
                 }
             }
-        }
-        
-        // Запись видео в режиме unstopable
-        if (unstopable_mode) {
-            if (!recorder.isRecording()) {
+            
+            if (unstopable_mode) {
+                if (!recorder.isRecording()) {
+                    recorder.startRecording();
+                }
+                recorder.writeFrame(processed);
+            }
+            else if (recorder.isRecording()) {
+                recorder.writeFrame(processed);
+                if (tracked_objects.empty() && (current_time - last_detection_time > RECORDING_DURATION) && 
+                    system_uptime > INITIAL_RECORDING_DURATION) {
+                    recorder.stopRecording();
+                }
+            }
+            
+            if (system_uptime < INITIAL_RECORDING_DURATION && !recorder.isRecording()) {
                 recorder.startRecording();
             }
-            recorder.writeFrame(processed);  // ЗАПИСЫВАЕМ ОБРАБОТАННЫЙ КАДР
-        }
-        // Обычная запись: при обнаружении людей и в течение 60 секунд после
-        else if (recorder.isRecording()) {
-            recorder.writeFrame(processed);  // ЗАПИСЫВАЕМ ОБРАБОТАННЫЙ КАДР
-            if (tracked_objects.empty() && (current_time - last_detection_time > RECORDING_DURATION) && 
-                system_uptime > INITIAL_RECORDING_DURATION) {
-                recorder.stopRecording();
-            }
-        }
-        
-        // Всегда записываем первые 60 секунд после старта
-        if (system_uptime < INITIAL_RECORDING_DURATION && !recorder.isRecording()) {
-            recorder.startRecording();
         }
         
         frame_counter++;
@@ -592,28 +647,40 @@ void video_processing_thread(TgBot::Bot* bot, ObserverLoop::VideoRecorder& recor
             std::this_thread::sleep_for(std::chrono::milliseconds(40 - elapsed));
         }
         
-        // Периодическая очистка старых видеофайлов (раз в час)
+        // Периодическая очистка (раз в час)
         static auto last_cleanup = std::chrono::steady_clock::now();
         if (std::chrono::duration<double>(loop_end - last_cleanup).count() > 3600) {
-            cleanupOldVideos();
+            cleanupOldVideos();   // внутри проверяется флаг
             last_cleanup = loop_end;
         }
     }
 }
 
-
-
-int main() {
+// ==================== main ====================
+int main(int argc, char* argv[]) {
     std::signal(SIGINT, signalHandler);
     std::signal(SIGTERM, signalHandler);
 
-    
-    
-    // Определяем путь к исполняемому файлу
+    // Парсим аргументы командной строки
+    ConfigFlags flags = parseArgs(argc, argv);
+    if (flags.help) {
+        printHelp(argv[0]);
+        return 0;
+    }
+
+    // Копируем флаги в атомарные глобальные переменные для доступа из функций
+    flag_recording = flags.recording;
+    flag_detection = flags.detection;
+    flag_effects   = flags.effects;
+    flag_sound     = flags.sound;
+    flag_cleanup   = flags.cleanup;
+    flag_animation = flags.animation;
+    flag_face      = flags.face;
+
+    // Определяем путь к ресурсам
     resource_dir = Utility::Settings::GetResourceDirFromExePath();
 
-    //Тесты и выход
-    
+    // Тесты (закомментированы)
     // bool test_result = Tests::makeTests(CAMERA_INDEX);
     // std::cout << "Tests " << (test_result ? "passed" : "failed") << std::endl;
     // return test_result ? 0 : 1;
@@ -638,10 +705,10 @@ int main() {
     TgBot::Bot bot(settings.kBot_token);
     ObserverLoop::VideoRecorder recorder(video_dir);
     
-    // Запуск потока обработки видео
-    std::thread video_thread(video_processing_thread, &bot, std::ref(recorder), std::ref(settings));
+    // Запуск потока обработки видео с передачей флагов
+    std::thread video_thread(video_processing_thread, &bot, std::ref(recorder), std::ref(settings), flags);
     
-    // Обработчики команд
+    // Обработчики команд (без изменений, но в /last можно добавить проверку записи)
     bot.getEvents().onCommand("start", [&](TgBot::Message::Ptr message) {
         auto user = message->from;
         auto uid  = user->id;
@@ -732,8 +799,13 @@ int main() {
             bot.getApi().sendMessage(message->chat->id, "⛔ У вас нет доступа.");
             return;
         }
+
+        // Если запись отключена, сообщаем об этом
+        if (!flag_recording) {
+            bot.getApi().sendMessage(message->chat->id, "⚠️ Запись видео отключена (флаг --no-recording).");
+            return;
+        }
         
-        // Сначала проверяем текущий день
         auto now = std::chrono::system_clock::now();
         time_t now_c = std::chrono::system_clock::to_time_t(now);
         tm now_tm = *std::localtime(&now_c);
@@ -743,7 +815,6 @@ int main() {
         
         std::string video_path = recorder.getVideoPathForDate(today);
         
-        // Если текущий день не найден, ищем последний существующий файл
         if (!std::filesystem::exists(video_path) || std::filesystem::file_size(video_path) <= 48) {
             for (int i = 1; i <= 7; ++i) {
                 auto date = now - std::chrono::hours(24 * i);
@@ -762,10 +833,9 @@ int main() {
         }
         
         if (video_path.empty() || !std::filesystem::exists(video_path) || std::filesystem::file_size(video_path) <= 48) {
-            bot.getApi().sendMessage(message->chat->id, "ostringstream Нет записанных видео");
+            bot.getApi().sendMessage(message->chat->id, "Нет записанных видео");
         } else {
             try {
-                // Убедимся, что файл закрыт перед отправкой
                 if (recorder.isRecording()) {
                     recorder.stopRecording();
                     std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -823,35 +893,31 @@ int main() {
         std::string status = "📊 Статус системы:\n";
         status += "Запись: " + std::string(recorder.isRecording() ? "✅ активна" : "❌ неактивна") + "\n";
         
-        // Определяем тип записи
         if (unstopable_mode) {
             status += "Режим: 🔄 непрерывная запись\n";
         } else {
-            if (recorder.isRecording()) {
-                status += "Режим: 🎯 запись при обнаружении\n";
-            } else {
-                status += "Режим: 🎯 запись при обнаружении\n";
-            }
+            status += "Режим: 🎯 запись при обнаружении\n";
         }
         
-        status += "Детекция: " + std::string("✅ активна (всегда)") + "\n";
+        status += "Детекция: " + std::string(flag_detection ? "✅ активна" : "❌ отключена") + "\n";
+        status += "Лица: " + std::string(flag_face ? "✅ активна" : "❌ отключена") + "\n";
+        status += "Эффекты: " + std::string(flag_effects ? "✅ включены" : "❌ отключены") + "\n";
+        status += "Звук: " + std::string(flag_sound ? "✅ включён" : "❌ отключён") + "\n";
+        status += "Очистка: " + std::string(flag_cleanup ? "✅ активна" : "❌ отключена") + "\n";
         status += "Люди в кадре: " + std::string(detection_active ? "⚠️ обнаружены" : "✅ не обнаружены") + "\n";
         status += "Уведомления: " + std::string(alert_enabled ? "🔔 включены" : "🔕 выключены") + "\n";
         status += "Авторизован: ID " + std::to_string(authorizedUserId);
         bot.getApi().sendMessage(message->chat->id, status);
     });
     
-    // /cpuinfo
     bot.getEvents().onCommand("cpuinfo", [&](TgBot::Message::Ptr message) {
         auto info = readFile("/proc/cpuinfo");
         if (info.empty()) {
             bot.getApi().sendMessage(message->chat->id, "❌ Не удалось прочитать /proc/cpuinfo");
         } else {
-            // Telegram ограничивает длину, можно разбить или отправить как файл
             if (info.size() < 3500) {
                 bot.getApi().sendMessage(message->chat->id, info);
             } else {
-                // отправим как файл
                 std::string tmp = "/tmp/cpuinfo.txt";
                 std::ofstream(tmp) << info;
                 bot.getApi().sendDocument(message->chat->id,
@@ -861,11 +927,9 @@ int main() {
         }
     });
     
-    // /temp
     bot.getEvents().onCommand("temp", [&](TgBot::Message::Ptr message) {
         std::ostringstream report;
         bool found = false;
-        // 1) thermal_zone*
         const std::filesystem::path thermalDir{"/sys/class/thermal"};
         if (std::filesystem::exists(thermalDir) && std::filesystem::is_directory(thermalDir)) {
             for (auto &entry : std::filesystem::directory_iterator(thermalDir)) {
@@ -890,11 +954,9 @@ int main() {
                 }
             }
         }
-        // 2) hwmon*
         const std::filesystem::path hwmonDir{"/sys/class/hwmon"};
         if (std::filesystem::exists(hwmonDir) && std::filesystem::is_directory(hwmonDir)) {
             for (auto &entry : std::filesystem::directory_iterator(hwmonDir)) {
-                // читаем имя драйвера (если есть)
                 std::string chip;
                 std::filesystem::path nameFile = entry.path() / "name";
                 if (std::filesystem::exists(nameFile)) {
@@ -902,7 +964,6 @@ int main() {
                 } else {
                     chip = entry.path().filename().string();
                 }
-                // перебираем tempN_input
                 for (auto &f : std::filesystem::directory_iterator(entry.path())) {
                     auto fname = f.path().filename().string();
                     if (fname.rfind("temp", 0) != 0 || fname.find("_input") == std::string::npos)
@@ -941,7 +1002,6 @@ int main() {
         }
     });
     
-    // /logs
     bot.getEvents().onCommand("logs", [&](TgBot::Message::Ptr message) {
         auto logPath = getLogFilePath();
         if (!std::filesystem::exists(logPath)) {
