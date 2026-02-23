@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 project(telegram_camera_bot LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -9,6 +9,7 @@ file(GLOB_RECURSE PROJECT_SOURCES
     ${CMAKE_SOURCE_DIR}/src/Utility/*.cpp
     ${CMAKE_SOURCE_DIR}/src/Utility/thirdparty/*.cpp  
     ${CMAKE_SOURCE_DIR}/src/ObserverLoop/*.cpp
+    ${CMAKE_SOURCE_DIR}/src/ObserverLoop/Detection/*.cpp
     ${CMAKE_SOURCE_DIR}/src/Startup/*.cpp
     ${CMAKE_SOURCE_DIR}/src/Tests/*.cpp
 )
@@ -26,6 +27,7 @@ endfunction()
 find_package(OpenCV REQUIRED)
 message(STATUS "OpenCV LIBS = ${OpenCV_LIBS}")
 find_package(indicators REQUIRED)
+find_package(onnxruntime REQUIRED)
 
 add_executable(${PROJECT_NAME} 
     ${PROJECT_SOURCES}
@@ -53,6 +55,7 @@ if(ON_SBC)
         ${CURL_LIBRARIES}
         ${OpenCV_LIBS}
         indicators::indicators
+        onnxruntime::onnxruntime
     )
 
 else()
@@ -70,6 +73,7 @@ else()
         CURL::libcurl
         indicators::indicators
         -static-libstdc++
+        onnxruntime::onnxruntime
     )
 endif()
 

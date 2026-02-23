@@ -2,8 +2,9 @@
 opencv/4.12.0
 ffmpeg/7.1.1
 tgbot/1.9.1
-boost/1.86.0
+boost/1.83.0
 indicators/2.3
+onnxruntime/1.18.1
 
 [options]
 opencv/*:with_v4l=True

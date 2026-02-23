@@ -5,3 +5,4 @@ CMake*.json
 bot.log
 sysroots
 bin
+.cache
