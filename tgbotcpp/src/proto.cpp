@@ -9,6 +9,7 @@
 #include <getopt.h>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <opencv2/dnn.hpp>
 #include <opencv2/dnn/all_layers.hpp>
@@ -145,6 +146,14 @@ const int CAMERA_INDEX = []() -> int {
   }
   return 0;
 }();
+
+std::string TG_API_TOKEN = []() -> std::string {
+  auto env = static_cast<std::string>(std::getenv("TG_API_TOKEN"));
+  if(!env.empty()) {
+    return env;
+  }
+  return "";
+}();
 const int FPS = 25;
 const float CONF_THRESHOLD = 0.5;
 const float NMS_THRESHOLD = 0.4;
@@ -157,6 +166,8 @@ std::atomic<bool> detection_active(false);
 std::atomic<bool> unstopable_mode(false);
 std::atomic<int64_t> authorizedUserId(0);
 cv::Mat last_frame;
+cv::Mat last_raw_frame;
+cv::Mat last_recognition_frame;
 std::mutex frame_mutex;
 std::mutex settings_mutex;
 
@@ -331,56 +342,17 @@ void video_processing_thread(TgBot::Bot *bot,
   std::vector<cv::String> output_layers = startup_manager.getOutputLayers();
   cv::CascadeClassifier face_cascade = startup_manager.getFaceCascade();
 
+  std::unique_ptr<ObserverLoop::Detection::YoloDetector> det_ptr_;
   std::expected<std::unique_ptr<ObserverLoop::Detection::YoloDetector>, ObserverLoop::Detection::GenericDetectorError> yolo_det;
   if (flags.detection) {
     yolo_det = ObserverLoop::Detection::YoloDetector::create(
-        "yolo11n.onnx", "coco.names");
-
-    auto result =
-        yolo_det
-            .and_then(
-                [](auto &&detector)
-                    -> std::expected<
-                        std::unique_ptr<ObserverLoop::Detection::YoloDetector>,
-                        ObserverLoop::Detection::GenericDetectorError> {
-                  std::cout << "YOLO detector created successfully!"
-                            << std::endl;
-
-                  auto loaded = detector->isModelLoaded();
-                  if (loaded && *loaded) {
-                    std::cout << "Model is loaded and ready" << std::endl;
-                  }
-
-                  return std::move(detector);
-                })
-            .or_else(
-                [](auto error)
-                    -> std::expected<
-                        std::unique_ptr<ObserverLoop::Detection::YoloDetector>,
-                        ObserverLoop::Detection::GenericDetectorError> {
-                  std::cerr << "Error creating YOLO detector: ";
-                  switch (error) {
-                  case ObserverLoop::Detection::GenericDetectorError::BAD_PATH:
-                    std::cerr << "Invalid model path" << std::endl;
-                    break;
-                  case ObserverLoop::Detection::GenericDetectorError::
-                      INIT_FAILED:
-                    std::cerr << "Initialization failed" << std::endl;
-                    break;
-                  default:
-                    std::cerr << "Unknown error" << std::endl;
-                    break;
-                  }
-                  return std::unexpected(error);
-                })
-            .and_then(
-                [](auto &&detector)
-                    -> std::expected<
-                        void, ObserverLoop::Detection::GenericDetectorError> {
-                  std::cout << "Using YOLO detector..." << std::endl;
-
-                  return {};
-                });
+        "/home/jetpclaptop/workspace/projects/jetbot/tgbotcpp/build/yolov10n.onnx", "/home/jetpclaptop/workspace/projects/jetbot/tgbotcpp/build/coco.names");
+     if (yolo_det.has_value()) {
+        det_ptr_ = std::move(*yolo_det);
+        std::cout << "Detector created and moved successfully\n";
+    } else {
+        std::cerr << "Failed to create YOLO detector. Detection disabled.\n";
+    }
   }
   int frame_counter = 0;
   double last_dump_time = 0.0;
@@ -409,9 +381,14 @@ void video_processing_thread(TgBot::Bot *bot,
       continue;
     }
 
-    auto det_ptr_ = std::move(*yolo_det);
+      {
+          std::lock_guard<std::mutex> lk(frame_mutex);
+          std::cout << "raw frame\n";
+          frame.copyTo(last_raw_frame);
+      }
 
     if (det_ptr_) {
+      std::cout << "1\n";
       auto detection_result = det_ptr_->detect(frame);
 
       if (detection_result) {
@@ -422,9 +399,18 @@ void video_processing_thread(TgBot::Bot *bot,
                     << std::endl;
         }
 
+      
+
         auto draw_result = det_ptr_->drawDetections(frame, detections);
         if (!draw_result) {
           std::cerr << "Drawing failed" << std::endl;
+        }
+
+        
+        {
+          std::lock_guard<std::mutex> lk(frame_mutex);
+          std::cout << "rec frame update\n";
+          frame.copyTo(last_recognition_frame);
         }
 
       } else {
@@ -555,10 +541,11 @@ int main(int argc, char *argv[]) {
     return 0;
   }
 
-  std::unique_ptr<Utility::DebugServer::DebugServer> debug_server;
+  std::shared_ptr<Utility::DebugServer::DebugServer> debug_server;
   if (flags.debug_server) {
-    debug_server = std::make_unique<Utility::DebugServer::DebugServer>(flags.debug_port);
+    debug_server = std::make_shared<Utility::DebugServer::DebugServer>(flags.debug_port);
     debug_server->start();
+    
   }
 
   flag_recording = flags.recording;
@@ -591,7 +578,7 @@ int main(int argc, char *argv[]) {
   alert_enabled = settings.alert_enabled;
   unstopable_mode = settings.unstopable_mode;
 
-  TgBot::Bot bot(settings.kBot_token);
+  TgBot::Bot bot(TG_API_TOKEN);
   ObserverLoop::VideoRecorder recorder(video_dir);
 
   std::thread video_thread(video_processing_thread, &bot, std::ref(recorder),
@@ -694,7 +681,6 @@ int main(int argc, char *argv[]) {
       return;
     }
 
-    // Если запись отключена, сообщаем об этом
     if (!flag_recording) {
       bot.getApi().sendMessage(
           message->chat->id, "⚠️ Запись видео отключена (флаг --no-recording).");

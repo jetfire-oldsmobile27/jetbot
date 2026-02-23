@@ -12,12 +12,7 @@ class Settings {
 public:
   int64_t authorizedUserId = 0;
   bool alert_enabled = true;
-  bool unstopable_mode = false; 
-  const std::string kBot_token {"7639692292:AAELfPguE_-DbZq-BUfixw885VYPwHPhErs"};
-
-  std::string yolo_weights = "yolov3-tiny.weights";
-  std::string yolo_cfg = "yolov3-tiny.cfg";
-  std::string cascade_path = "haarcascade_frontalface_default.xml";
+  bool unstopable_mode = false;   
 
 
   static std::string GetResourceDirFromExePath() {
@@ -52,12 +47,6 @@ public:
         alert_enabled = obj["alert_enabled"].as_bool();
       if (obj.contains("unstopable_mode"))
         unstopable_mode = obj["unstopable_mode"].as_bool();
-      if (obj.contains("yolo_weights"))
-        yolo_weights = obj["yolo_weights"].as_string().c_str();
-      if (obj.contains("yolo_cfg"))
-        yolo_cfg = obj["yolo_cfg"].as_string().c_str();
-      if (obj.contains("cascade_path"))
-        cascade_path = obj["cascade_path"].as_string().c_str();
     } catch (...) {
       std::cerr << "Error loading settings" << std::endl;
     }
@@ -68,9 +57,6 @@ public:
     obj["authorizedUserId"] = authorizedUserId;
     obj["alert_enabled"] = alert_enabled;
     obj["unstopable_mode"] = unstopable_mode;
-    obj["yolo_weights"] = yolo_weights;
-    obj["yolo_cfg"] = yolo_cfg;
-    obj["cascade_path"] = cascade_path;
     std::ofstream ofs(path);
     ofs << boost::json::serialize(obj);
   }
