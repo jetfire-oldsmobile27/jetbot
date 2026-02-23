@@ -64,7 +64,7 @@ void video_processing_thread(TgBot::Bot *bot,
   std::expected<std::unique_ptr<ObserverLoop::Detection::YoloDetector>, ObserverLoop::Detection::GenericDetectorError> yolo_det;
   if (flags.detection) {
     yolo_det = ObserverLoop::Detection::YoloDetector::create(
-        "/home/jetpclaptop/workspace/projects/jetbot/tgbotcpp/build/yolov10n.onnx", "/home/jetpclaptop/workspace/projects/jetbot/tgbotcpp/build/coco.names");
+        ONNX_MODEL_PATH, COCO_NAMES_PATH);
      if (yolo_det.has_value()) {
         det_ptr_ = std::move(*yolo_det);
         std::cout << "Detector created and moved successfully\n";

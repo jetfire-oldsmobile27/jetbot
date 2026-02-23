@@ -38,6 +38,8 @@ const int WIDTH = 640;
 const int HEIGHT = 480;
 extern const int CAMERA_INDEX;
 extern const std::string TG_API_TOKEN;
+extern const std::string ONNX_MODEL_PATH;
+extern const std::string COCO_NAMES_PATH;
 const int FPS = 25;
 const float CONF_THRESHOLD = 0.5f;
 const float NMS_THRESHOLD = 0.4f;

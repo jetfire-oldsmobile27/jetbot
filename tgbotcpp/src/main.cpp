@@ -35,8 +35,8 @@ cv::Mat last_recognition_frame;
 std::mutex frame_mutex;
 std::mutex settings_mutex;
 
-std::string jetbot_dir;
 std::string video_dir;
+std::string jetbot_dir;
 std::string logs_dir;
 std::string settings_path;
 std::string resource_dir;
@@ -49,6 +49,16 @@ const int CAMERA_INDEX = []() -> int {
 const std::string TG_API_TOKEN = []() -> std::string {
   const char *env = std::getenv("TG_API_TOKEN");
   return env ? env : "";
+}();
+
+const std::string ONNX_MODEL_PATH = []()-> std::string {
+  const char* env = std::getenv("ONNX_MODEL_PATH");
+  return env ? env : "/home/jetpclaptop/workspace/projects/jetbot/tgbotcpp/build/yolov10n.onnx";
+}();
+
+const std::string COCO_NAMES_PATH = []()-> std::string {
+  const char* env = std::getenv("COCO_NAMES_PATH");
+  return env ? env : "/home/jetpclaptop/workspace/projects/jetbot/tgbotcpp/build/coco.names";
 }();
 
 void signalHandler(int) { running = false; }
