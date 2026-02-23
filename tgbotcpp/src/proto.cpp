@@ -6,7 +6,7 @@
 #include <expected>
 #include <filesystem>
 #include <fstream>
-#include <getopt.h> 
+#include <getopt.h>
 #include <iomanip>
 #include <iostream>
 #include <mutex>
@@ -28,6 +28,7 @@
 #include "ObserverLoop/VideoRecorder.hpp"
 #include "Startup/StartupManager.hpp"
 #include "Tests/Test.hpp"
+#include "Utility/Debug-server/DebugServer.hpp"
 #include "Utility/Effects.hpp"
 #include "Utility/Settings.hpp"
 
@@ -40,10 +41,12 @@ struct ConfigFlags {
   bool cleanup = true;   // очистка старых видео
   bool animation = true; // анимация при старте
   bool face = true;      // детекция лиц
+  
+  bool debug_server = false; 
+  int debug_port = 8080; 
 
   bool help = false; // показать справку
 };
-
 
 std::atomic<bool> flag_recording{true};
 std::atomic<bool> flag_detection{true};
@@ -67,6 +70,7 @@ void printHelp(const char *progname) {
          "видео\n"
       << "  --no-animation       Отключить анимацию при инициализации\n"
       << "  --no-face            Отключить детекцию лиц\n"
+      << "  --debug-server[=PORT] Запустить отладочный HTTP сервер для просмотра кадров (порт по умолчанию: 8080)\n"
       << "  --help, -h           Показать эту справку\n";
 }
 
@@ -80,6 +84,7 @@ ConfigFlags parseCmdlineArgs(int argc, char *argv[]) {
       {"no-cleanup", no_argument, nullptr, 'c'},
       {"no-animation", no_argument, nullptr, 'a'},
       {"no-face", no_argument, nullptr, 'f'},
+      {"debug-server", optional_argument, nullptr, 1000},
       {"help", no_argument, nullptr, 'h'},
       {nullptr, 0, nullptr, 0}};
 
@@ -106,6 +111,14 @@ ConfigFlags parseCmdlineArgs(int argc, char *argv[]) {
       break;
     case 'f':
       flags.face = false;
+      break;
+    case 1000: // код для --debug-server
+      flags.debug_server = true;
+      if (optarg) {
+        try {
+          flags.debug_port = std::stoi(optarg);
+        } catch (...) {}
+      }
       break;
     case 'h':
       flags.help = true;
@@ -182,7 +195,7 @@ std::string readFile(const std::string &path) {
 
 void cleanupOldVideos() {
   if (!flag_cleanup)
-    return; 
+    return;
   try {
     auto now = std::chrono::system_clock::now();
     auto thirty_days_ago = now - std::chrono::hours(24 * 30);
@@ -318,52 +331,57 @@ void video_processing_thread(TgBot::Bot *bot,
   std::vector<cv::String> output_layers = startup_manager.getOutputLayers();
   cv::CascadeClassifier face_cascade = startup_manager.getFaceCascade();
 
-  auto yolo_det = ObserverLoop::Detection::YoloDetector::create("yolo11n.onnx",
-                                                                "coco.names");
+  std::expected<std::unique_ptr<ObserverLoop::Detection::YoloDetector>, ObserverLoop::Detection::GenericDetectorError> yolo_det;
+  if (flags.detection) {
+    yolo_det = ObserverLoop::Detection::YoloDetector::create(
+        "yolo11n.onnx", "coco.names");
 
-  auto result =
-      yolo_det
-          .and_then(
-              [](auto &&detector)
-                  -> std::expected<
-                      std::unique_ptr<ObserverLoop::Detection::YoloDetector>,
-                      ObserverLoop::Detection::GenericDetectorError> {
-                std::cout << "YOLO detector created successfully!" << std::endl;
+    auto result =
+        yolo_det
+            .and_then(
+                [](auto &&detector)
+                    -> std::expected<
+                        std::unique_ptr<ObserverLoop::Detection::YoloDetector>,
+                        ObserverLoop::Detection::GenericDetectorError> {
+                  std::cout << "YOLO detector created successfully!"
+                            << std::endl;
 
-                auto loaded = detector->isModelLoaded();
-                if (loaded && *loaded) {
-                  std::cout << "Model is loaded and ready" << std::endl;
-                }
+                  auto loaded = detector->isModelLoaded();
+                  if (loaded && *loaded) {
+                    std::cout << "Model is loaded and ready" << std::endl;
+                  }
 
-                return std::move(detector);
-              })
-          .or_else(
-              [](auto error)
-                  -> std::expected<
-                      std::unique_ptr<ObserverLoop::Detection::YoloDetector>,
-                      ObserverLoop::Detection::GenericDetectorError> {
-                std::cerr << "Error creating YOLO detector: ";
-                switch (error) {
-                case ObserverLoop::Detection::GenericDetectorError::BAD_PATH:
-                  std::cerr << "Invalid model path" << std::endl;
-                  break;
-                case ObserverLoop::Detection::GenericDetectorError::INIT_FAILED:
-                  std::cerr << "Initialization failed" << std::endl;
-                  break;
-                default:
-                  std::cerr << "Unknown error" << std::endl;
-                  break;
-                }
-                return std::unexpected(error);
-              })
-          .and_then(
-              [](auto &&detector)
-                  -> std::expected<
-                      void, ObserverLoop::Detection::GenericDetectorError> {
-                std::cout << "Using YOLO detector..." << std::endl;
+                  return std::move(detector);
+                })
+            .or_else(
+                [](auto error)
+                    -> std::expected<
+                        std::unique_ptr<ObserverLoop::Detection::YoloDetector>,
+                        ObserverLoop::Detection::GenericDetectorError> {
+                  std::cerr << "Error creating YOLO detector: ";
+                  switch (error) {
+                  case ObserverLoop::Detection::GenericDetectorError::BAD_PATH:
+                    std::cerr << "Invalid model path" << std::endl;
+                    break;
+                  case ObserverLoop::Detection::GenericDetectorError::
+                      INIT_FAILED:
+                    std::cerr << "Initialization failed" << std::endl;
+                    break;
+                  default:
+                    std::cerr << "Unknown error" << std::endl;
+                    break;
+                  }
+                  return std::unexpected(error);
+                })
+            .and_then(
+                [](auto &&detector)
+                    -> std::expected<
+                        void, ObserverLoop::Detection::GenericDetectorError> {
+                  std::cout << "Using YOLO detector..." << std::endl;
 
-                return {};
-              });
+                  return {};
+                });
+  }
   int frame_counter = 0;
   double last_dump_time = 0.0;
   cv::Mat memory_dump = Utility::Effects::generateMemoryDump(WIDTH, HEIGHT);
@@ -452,7 +470,8 @@ void video_processing_thread(TgBot::Bot *bot,
     double fps =
         1.0 / (std::chrono::duration<double>(loop_start - start_time).count() +
                0.001);
-    // cv::putText(processed, "TARGETS: " + std::to_string(tracked_objects.size()),
+    // cv::putText(processed, "TARGETS: " +
+    // std::to_string(tracked_objects.size()),
     //             cv::Point(WIDTH - 170, 30), cv::FONT_HERSHEY_SIMPLEX, 0.6,
     //             cv::Scalar(0, 0, 255), 1);
     cv::putText(processed, "FPS: " + std::to_string(static_cast<int>(fps)),
@@ -465,27 +484,27 @@ void video_processing_thread(TgBot::Bot *bot,
     }
 
     if (flags.recording) {
-    //   if (!tracked_objects.empty()) {
-    //     last_detection_time = current_time;
-    //     detection_active = true;
+      //   if (!tracked_objects.empty()) {
+      //     last_detection_time = current_time;
+      //     detection_active = true;
 
-    //     if (!recorder.isRecording()) {
-    //       recorder.startRecording();
-    //       if (alert_enabled && authorizedUserId != 0) {
-    //         std::string tmp_path = "/tmp/detection_alert.jpg";
-    //         cv::imwrite(tmp_path, frame);
-    //         try {
-    //           bot->getApi().sendPhoto(
-    //               authorizedUserId,
-    //               TgBot::InputFile::fromFile(tmp_path, "image/jpeg"),
-    //               "Обнаружены люди в кадре");
-    //         } catch (...) {
-    //           logMsg("Ошибка отправки уведомления");
-    //         }
-    //         std::filesystem::remove(tmp_path);
-    //       }
-    //     }
-    //   }
+      //     if (!recorder.isRecording()) {
+      //       recorder.startRecording();
+      //       if (alert_enabled && authorizedUserId != 0) {
+      //         std::string tmp_path = "/tmp/detection_alert.jpg";
+      //         cv::imwrite(tmp_path, frame);
+      //         try {
+      //           bot->getApi().sendPhoto(
+      //               authorizedUserId,
+      //               TgBot::InputFile::fromFile(tmp_path, "image/jpeg"),
+      //               "Обнаружены люди в кадре");
+      //         } catch (...) {
+      //           logMsg("Ошибка отправки уведомления");
+      //         }
+      //         std::filesystem::remove(tmp_path);
+      //       }
+      //     }
+      //   }
 
       if (unstopable_mode) {
         if (!recorder.isRecording()) {
@@ -517,7 +536,8 @@ void video_processing_thread(TgBot::Bot *bot,
     }
 
     static auto last_cleanup = std::chrono::steady_clock::now();
-    if (std::chrono::duration<double>(loop_end - last_cleanup).count() > 3600 /* Раз в час*/) {
+    if (std::chrono::duration<double>(loop_end - last_cleanup).count() >
+        3600 /* Раз в час*/) {
       cleanupOldVideos(); // внутри проверяется флаг
       last_cleanup = loop_end;
     }
@@ -533,6 +553,12 @@ int main(int argc, char *argv[]) {
   if (flags.help) {
     printHelp(argv[0]);
     return 0;
+  }
+
+  std::unique_ptr<Utility::DebugServer::DebugServer> debug_server;
+  if (flags.debug_server) {
+    debug_server = std::make_unique<Utility::DebugServer::DebugServer>(flags.debug_port);
+    debug_server->start();
   }
 
   flag_recording = flags.recording;
