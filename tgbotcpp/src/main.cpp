@@ -15,7 +15,6 @@
 #include "Utility/Settings.hpp"
 #include "Utility/Debug-server/DebugServer.hpp"
 
-// Определения глобальных переменных
 std::atomic<bool> flag_recording{true};
 std::atomic<bool> flag_detection{true};
 std::atomic<bool> flag_effects{true};
