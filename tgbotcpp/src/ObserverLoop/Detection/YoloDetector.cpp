@@ -182,9 +182,7 @@ auto YoloDetector::detect(cv::Mat &frame)
     if (frame.empty()) {
         return std::unexpected(GenericDetectorError::EMPTY_FRAME);
     }
-    
-    printf("-> Processing frame: %d x %d\n", frame.cols, frame.rows);
-    
+        
     try {
         auto yoloDetections = pImpl_->detector->detect(frame);
         std::vector<DetectionResult> results;
@@ -205,7 +203,7 @@ auto YoloDetector::detect(cv::Mat &frame)
         }
         
         
-        printf("Detected %zu objects\n", results.size());
+        //printf("Detected %zu objects\n", results.size());
         
         return results;
         

@@ -13,6 +13,7 @@ file(GLOB_RECURSE PROJECT_SOURCES
     ${CMAKE_SOURCE_DIR}/src/ObserverLoop/Detection/*.cpp
     ${CMAKE_SOURCE_DIR}/src/Startup/*.cpp
     ${CMAKE_SOURCE_DIR}/src/Tests/*.cpp
+    ${CMAKE_SOURCE_DIR}/src/*.cpp
 )
 
 function(add_all_include_directories base_dir)
@@ -32,7 +33,6 @@ find_package(onnxruntime REQUIRED)
 
 add_executable(${PROJECT_NAME} 
     ${PROJECT_SOURCES}
-    src/proto.cpp  
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)

@@ -1,3 +1,4 @@
+#pragma once
 #include <boost/json.hpp>
 #include <filesystem>
 #include <iostream>
