@@ -5,6 +5,8 @@ tgbot/1.9.1
 boost/1.83.0
 indicators/2.3
 onnxruntime/1.18.1
+nlohmann_json/3.11.3
+vkapi/0.0.9@qucals/stable
 
 [options]
 opencv/*:with_v4l=True

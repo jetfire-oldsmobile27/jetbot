@@ -1,19 +1,22 @@
-#include "Globals.hpp"
 #include "Config.hpp"
+#include "Globals.hpp"
 #include "Logging.hpp"
 #include "VideoThread.hpp"
 
+#include <BotBase.hpp>
+#include <iterator>
+#include <random>
+
+#include "ObserverLoop/VideoRecorder.hpp"
+#include "Utility/Debug-server/DebugServer.hpp"
+#include "Utility/Settings.hpp"
 #include <csignal>
 #include <filesystem>
 #include <iostream>
 #include <memory>
-#include <thread>
 #include <tgbot/Bot.h>
 #include <tgbot/net/TgLongPoll.h>
-
-#include "ObserverLoop/VideoRecorder.hpp"
-#include "Utility/Settings.hpp"
-#include "Utility/Debug-server/DebugServer.hpp"
+#include <thread>
 
 std::atomic<bool> flag_recording{true};
 std::atomic<bool> flag_detection{true};
@@ -51,17 +54,784 @@ const std::string TG_API_TOKEN = []() -> std::string {
   return env ? env : "";
 }();
 
-const std::string ONNX_MODEL_PATH = []()-> std::string {
-  const char* env = std::getenv("ONNX_MODEL_PATH");
-  return env ? env : "/home/jetpclaptop/workspace/projects/jetbot/tgbotcpp/build/yolov10n.onnx";
+const std::string VK_ACCESS_TOKEN = []() -> std::string {
+  const char *env = std::getenv("VK_ACCESS_TOKEN");
+  return env ? env : "";
 }();
 
-const std::string COCO_NAMES_PATH = []()-> std::string {
-  const char* env = std::getenv("COCO_NAMES_PATH");
-  return env ? env : "/home/jetpclaptop/workspace/projects/jetbot/tgbotcpp/build/coco.names";
+const std::string VK_GROUP_ID = []() -> std::string {
+  const char *env = std::getenv("VK_GROUP_ID");
+  return env ? env : "";
+}();
+
+const std::string ONNX_MODEL_PATH = []() -> std::string {
+  const char *env = std::getenv("ONNX_MODEL_PATH");
+  return env ? env
+             : "/home/jetpclaptop/workspace/projects/jetbot/tgbotcpp/build/"
+               "yolov10n.onnx";
+}();
+
+const std::string COCO_NAMES_PATH = []() -> std::string {
+  const char *env = std::getenv("COCO_NAMES_PATH");
+  return env ? env
+             : "/home/jetpclaptop/workspace/projects/jetbot/tgbotcpp/build/"
+               "coco.names";
 }();
 
 void signalHandler(int) { running = false; }
+
+int64_t generate_random_id() {
+  static std::random_device rd;
+  static std::mt19937_64 gen(rd());
+  static std::uniform_int_distribution<int64_t> dis;
+  return dis(gen);
+}
+
+std::string uploadFileToVk(const std::string &url, const std::string &filePath,
+                           const std::string &fieldName) {
+  CURL *curl = curl_easy_init();
+  if (!curl)
+    return "";
+
+  struct curl_httppost *formpost = NULL;
+  struct curl_httppost *lastptr = NULL;
+  curl_formadd(&formpost, &lastptr, CURLFORM_COPYNAME, fieldName.c_str(),
+               CURLFORM_FILE, filePath.c_str(), CURLFORM_END);
+
+  std::string response;
+  long http_code = 0;
+
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_HTTPPOST, formpost);
+  curl_easy_setopt(
+      curl, CURLOPT_WRITEFUNCTION,
+      +[](char *ptr, size_t size, size_t nmemb, std::string *data) {
+        data->append(ptr, size * nmemb);
+        return size * nmemb;
+      });
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+
+  CURLcode res = curl_easy_perform(curl);
+  if (res == CURLE_OK) {
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+  }
+  curl_easy_cleanup(curl);
+  curl_formfree(formpost);
+
+  if (res != CURLE_OK) {
+    std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res)
+              << std::endl;
+    return "";
+  }
+  if (http_code != 200) {
+    std::cerr << "HTTP error " << http_code << " response: " << response
+              << std::endl;
+    return "";
+  }
+  return response;
+}
+void sendVkMessage(vk::base::bot::BotBase &bot, int64_t peer_id,
+                   const std::string &message) {
+  vk::base::JsonType params;
+  params["peer_id"] = std::to_string(peer_id);
+  params["message"] = message;
+  params["random_id"] = std::to_string(generate_random_id());
+  auto response =
+      bot.SendRequest(vk::base::bot::BotBase::METHODS::SEND_MESSAGE, params);
+  if (response.contains("error"))
+    std::cerr << "VK sendMessage error: " << response.dump() << std::endl;
+}
+
+void sendVkPhoto(vk::base::bot::BotBase &bot, int64_t peer_id,
+                 const std::string &file_path) {
+  try {
+    // 1. Получаем upload_url
+    vk::base::JsonType params;
+    params["peer_id"] = std::to_string(peer_id);
+    auto upload_server =
+        bot.SendRequest("photos.getMessagesUploadServer", params);
+    if (upload_server.contains("error")) {
+      std::cerr << "getMessagesUploadServer error: " << upload_server.dump()
+                << std::endl;
+      sendVkMessage(bot, peer_id,
+                    "❌ Ошибка получения сервера для загрузки фото.");
+      return;
+    }
+    if (!upload_server.contains("response") ||
+        !upload_server["response"].contains("upload_url")) {
+      std::cerr << "Invalid upload server response: " << upload_server.dump()
+                << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Неверный ответ от сервера VK.");
+      return;
+    }
+    std::string upload_url =
+        upload_server["response"]["upload_url"].get<std::string>();
+
+    // 2. Загружаем файл
+    std::string response = uploadFileToVk(upload_url, file_path, "photo");
+    if (response.empty()) {
+      sendVkMessage(bot, peer_id, "❌ Ошибка загрузки файла на сервер VK.");
+      return;
+    }
+
+    vk::base::JsonType json_response;
+    try {
+      json_response = vk::base::JsonType::parse(response);
+    } catch (const std::exception &e) {
+      std::cerr << "Failed to parse upload response: " << response
+                << " error: " << e.what() << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Ошибка парсинга ответа от сервера.");
+      return;
+    }
+
+    // Проверяем наличие обязательных полей
+    if (!json_response.contains("photo") || !json_response.contains("server") ||
+        !json_response.contains("hash")) {
+      std::cerr << "Missing fields in upload response: " << json_response.dump()
+                << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Неполный ответ от сервера загрузки.");
+      return;
+    }
+
+    // 3. Сохраняем фото (ВСЕ поля как строки для JSON)
+    vk::base::JsonType save_params;
+
+    // photo - всегда строка
+    auto &photo_val = json_response["photo"];
+    if (photo_val.is_string()) {
+      save_params["photo"] = photo_val.get<std::string>();
+    } else {
+      save_params["photo"] = std::to_string(photo_val.get<int64_t>());
+    }
+
+    // server - всегда строка (VK API принимает и число, и строку, но строка
+    // безопаснее)
+    auto &server_val = json_response["server"];
+    if (server_val.is_number()) {
+      save_params["server"] = std::to_string(server_val.get<int>());
+    } else {
+      save_params["server"] = server_val.get<std::string>();
+    }
+
+    // hash - строка
+    save_params["hash"] = json_response["hash"].get<std::string>();
+
+    auto saved = bot.SendRequest("photos.saveMessagesPhoto", save_params);
+    if (saved.contains("error")) {
+      std::cerr << "saveMessagesPhoto error: " << saved.dump() << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Ошибка сохранения фото в VK.");
+      return;
+    }
+
+    if (!saved.contains("response")) {
+      std::cerr << "No response in save result: " << saved.dump() << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Ошибка: пустой ответ от сервера.");
+      return;
+    }
+
+    vk::base::JsonType photo_info;
+    if (saved["response"].is_array() && !saved["response"].empty()) {
+      photo_info = saved["response"][0];
+    } else if (saved["response"].is_object()) {
+      photo_info = saved["response"];
+    } else {
+      std::cerr << "Unexpected response type: " << saved["response"].dump()
+                << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Ошибка формата ответа.");
+      return;
+    }
+
+    if (!photo_info.contains("owner_id") || !photo_info.contains("id")) {
+      std::cerr << "Missing owner_id or id in photo info: " << photo_info.dump()
+                << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Ошибка получения данных фото.");
+      return;
+    }
+
+    // Безопасное преобразование owner_id и id
+    int64_t owner_id = 0;
+    if (photo_info["owner_id"].is_number())
+      owner_id = photo_info["owner_id"].get<int64_t>();
+    else
+      owner_id = std::stoll(photo_info["owner_id"].get<std::string>());
+
+    int64_t id = 0;
+    if (photo_info["id"].is_number())
+      id = photo_info["id"].get<int64_t>();
+    else
+      id = std::stoll(photo_info["id"].get<std::string>());
+
+    std::string attachment =
+        "photo" + std::to_string(owner_id) + "_" + std::to_string(id);
+    vk::base::JsonType msg_params;
+    msg_params["peer_id"] = std::to_string(peer_id);
+    msg_params["attachment"] = attachment;
+    msg_params["random_id"] = std::to_string(generate_random_id());
+    auto msg_response = bot.SendRequest(
+        vk::base::bot::BotBase::METHODS::SEND_MESSAGE, msg_params);
+    if (msg_response.contains("error")) {
+      std::cerr << "send photo message error: " << msg_response.dump()
+                << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Ошибка отправки сообщения с фото.");
+    }
+  } catch (const std::exception &e) {
+    std::cerr << "Exception in sendVkPhoto: " << e.what() << std::endl;
+    sendVkMessage(bot, peer_id, "❌ Внутренняя ошибка при отправке фото.");
+  }
+}
+void sendVkDocument(vk::base::bot::BotBase &bot, int64_t peer_id,
+                    const std::string &file_path,
+                    const std::string &type_hint = "") {
+  try {
+    // 1. Получаем upload_url
+    vk::base::JsonType params;
+    params["peer_id"] = std::to_string(peer_id);
+    params["type"] = "doc";
+    auto upload_server =
+        bot.SendRequest("docs.getMessagesUploadServer", params);
+    if (upload_server.contains("error")) {
+      std::cerr << "getMessagesUploadServer error: " << upload_server.dump()
+                << std::endl;
+      sendVkMessage(bot, peer_id,
+                    "❌ Ошибка получения сервера для загрузки документа.");
+      return;
+    }
+    if (!upload_server.contains("response") ||
+        !upload_server["response"].contains("upload_url")) {
+      std::cerr << "Invalid upload server response: " << upload_server.dump()
+                << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Неверный ответ от сервера VK.");
+      return;
+    }
+    std::string upload_url =
+        upload_server["response"]["upload_url"].get<std::string>();
+
+    // 2. Загружаем файл
+    std::string response = uploadFileToVk(upload_url, file_path, "file");
+    if (response.empty()) {
+      sendVkMessage(bot, peer_id, "❌ Ошибка загрузки файла на сервер VK.");
+      return;
+    }
+
+    vk::base::JsonType json_response;
+    try {
+      json_response = vk::base::JsonType::parse(response);
+    } catch (const std::exception &e) {
+      std::cerr << "Failed to parse upload response: " << response
+                << " error: " << e.what() << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Ошибка парсинга ответа от сервера.");
+      return;
+    }
+
+    if (!json_response.contains("file")) {
+      std::cerr << "Missing 'file' in upload response: " << json_response.dump()
+                << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Неполный ответ от сервера загрузки.");
+      return;
+    }
+
+    // 3. Сохраняем документ (безопасное извлечение)
+    vk::base::JsonType save_params;
+    auto &file_val = json_response["file"];
+    if (file_val.is_string()) {
+      save_params["file"] = file_val.get<std::string>();
+    } else if (file_val.is_number()) {
+      save_params["file"] = std::to_string(file_val.get<int64_t>());
+    } else {
+      save_params["file"] = file_val.dump();
+    }
+
+    auto saved = bot.SendRequest("docs.save", save_params);
+    if (saved.contains("error")) {
+      std::cerr << "docs.save error: " << saved.dump() << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Ошибка сохранения документа в VK.");
+      return;
+    }
+
+    // Новый правильный парсинг
+    if (!saved.contains("response") || !saved["response"].contains("doc")) {
+      std::cerr << "Invalid save response: " << saved.dump() << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Ошибка: документ не сохранён.");
+      return;
+    }
+
+    auto doc_info = saved["response"]["doc"];
+    if (!doc_info.contains("owner_id") || !doc_info.contains("id")) {
+      std::cerr << "Missing owner_id or id in doc info: " << doc_info.dump()
+                << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Ошибка получения данных документа.");
+      return;
+    }
+
+    std::string attachment = "doc" +
+                             std::to_string(doc_info["owner_id"].get<int>()) +
+                             "_" + std::to_string(doc_info["id"].get<int>());
+
+    vk::base::JsonType msg_params;
+    msg_params["peer_id"] = std::to_string(peer_id);
+    msg_params["attachment"] = attachment;
+    msg_params["random_id"] = std::to_string(generate_random_id());
+
+    auto msg_response = bot.SendRequest(
+        vk::base::bot::BotBase::METHODS::SEND_MESSAGE, msg_params);
+    if (msg_response.contains("error")) {
+      std::cerr << "send document message error: " << msg_response.dump()
+                << std::endl;
+      sendVkMessage(bot, peer_id, "❌ Ошибка отправки сообщения с документом.");
+    }
+  } catch (const std::exception &e) {
+    std::cerr << "Exception in sendVkPhoto: " << e.what() << std::endl;
+    sendVkMessage(bot, peer_id, "❌ Внутренняя ошибка при отправке фото.");
+  }
+}
+void vk_bot_thread(Utility::Settings &settings,
+                   ObserverLoop::VideoRecorder &recorder) {
+
+  while (running) {
+    try {
+      vk::base::bot::BotBase bot_vk(VK_GROUP_ID);
+
+      if (!bot_vk.Auth(VK_ACCESS_TOKEN)) {
+        std::cerr << "VK Auth failed, retrying in 5s..." << std::endl;
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+        continue;
+      }
+      std::cout << "VK bot started" << std::endl;
+
+      while (running) {
+        auto event = bot_vk.WaitForEvent();
+        if (event.parameters.is_null()) {
+          std::cerr << "Null event parameters, skipping..." << std::endl;
+          continue;
+        }
+        switch (event.type) {
+        case vk::base::bot::BotBase::EVENTS::MESSAGE_NEW: {
+          std::cout << "Новое сообщение VK!" << std::endl;
+
+          if (!event.parameters.contains("object") ||
+              event.parameters["object"].is_null())
+            break;
+          auto object = event.parameters["object"];
+          if (!object.contains("message") || object["message"].is_null())
+            break;
+          auto message_data = object["message"];
+          if (!message_data.contains("peer_id")) {
+            std::cerr << "peer_id not found, skipping" << std::endl;
+            break;
+          }
+          int64_t peer_id = 0;
+          if (message_data.contains("peer_id") &&
+              message_data["peer_id"].is_number_integer())
+            peer_id = message_data["peer_id"].get<int64_t>();
+          else {
+            std::cerr << "peer_id not found or not integer, skipping"
+                      << std::endl;
+            break;
+          }
+
+          std::string text;
+          if (message_data.contains("text") &&
+              !message_data["text"].is_null()) {
+            auto &text_val = message_data["text"];
+            if (text_val.is_string())
+              text = text_val.get<std::string>();
+            else
+              text = text_val.dump();
+          } else {
+            text = "⚠️ [нет текста]";
+          }
+
+          // --- Обработка команд ---
+          if (!text.empty() && text[0] == '/') {
+            std::istringstream iss(text);
+            std::string cmd;
+            iss >> cmd;
+            std::string arg;
+            std::getline(iss >> std::ws, arg);
+
+            if (cmd == "/start") {
+              int64_t uid = peer_id;
+              if (authorizedUserId.load() == 0) {
+                authorizedUserId = uid;
+                {
+                  std::lock_guard<std::mutex> lock(settings_mutex);
+                  settings.authorizedUserId = uid;
+                  settings.save(settings_path);
+                }
+                logMsg("🔓 VK Доступ выдан: ID " + std::to_string(uid));
+                sendVkMessage(bot_vk, peer_id,
+                              "✅ Вы авторизованы!\nВаш ID: " +
+                                  std::to_string(uid));
+              } else if (uid == authorizedUserId.load()) {
+                sendVkMessage(bot_vk, peer_id, "ℹ️ Вы уже авторизованы.");
+              } else {
+                logMsg("❌ VK Попытка /start от неразрешённого: ID " +
+                       std::to_string(uid));
+                sendVkMessage(bot_vk, peer_id,
+                              "⛔ Доступ имеет только первый обратившийся.");
+              }
+            } else if (cmd == "/photo") {
+              int64_t uid = peer_id;
+              if (uid != authorizedUserId.load()) {
+                sendVkMessage(bot_vk, peer_id, "⛔ У вас нет доступа.");
+                break;
+              }
+              cv::Mat frame_copy;
+              {
+                std::lock_guard<std::mutex> lock(frame_mutex);
+                if (last_frame.empty()) {
+                  sendVkMessage(bot_vk, peer_id, "⚠️ Нет данных с камеры.");
+                  break;
+                }
+                frame_copy = last_frame.clone();
+              }
+              auto now = std::chrono::system_clock::now();
+              auto t = std::chrono::system_clock::to_time_t(now);
+              std::ostringstream fn;
+              fn << std::put_time(std::localtime(&t), "%Y%m%d%H%M%S") << ".jpg";
+              std::filesystem::path tmp =
+                  std::filesystem::temp_directory_path() / fn.str();
+              if (!cv::imwrite(tmp.string(), frame_copy)) {
+                sendVkMessage(bot_vk, peer_id, "❌ Ошибка сохранения кадра.");
+                break;
+              }
+              sendVkPhoto(bot_vk, peer_id, tmp.string());
+              std::filesystem::remove(tmp);
+            } else if (cmd == "/alert") {
+              int64_t uid = peer_id;
+              if (uid != authorizedUserId.load()) {
+                sendVkMessage(bot_vk, peer_id, "⛔ У вас нет доступа.");
+                break;
+              }
+              if (arg == "on") {
+                alert_enabled = true;
+                {
+                  std::lock_guard<std::mutex> lock(settings_mutex);
+                  settings.alert_enabled = true;
+                  settings.save(settings_path);
+                }
+                sendVkMessage(bot_vk, peer_id, "🔔 Уведомления включены");
+              } else if (arg == "off") {
+                alert_enabled = false;
+                {
+                  std::lock_guard<std::mutex> lock(settings_mutex);
+                  settings.alert_enabled = false;
+                  settings.save(settings_path);
+                }
+                sendVkMessage(bot_vk, peer_id, "🔕 Уведомления выключены");
+              } else {
+                sendVkMessage(bot_vk, peer_id,
+                              "Использование: /alert on или /alert off");
+              }
+            } else if (cmd == "/last") {
+              int64_t uid = peer_id;
+              if (uid != authorizedUserId.load()) {
+                sendVkMessage(bot_vk, peer_id, "⛔ У вас нет доступа.");
+                break;
+              }
+              if (!flag_recording.load()) {
+                sendVkMessage(
+                    bot_vk, peer_id,
+                    "⚠️ Запись видео отключена (флаг --no-recording).");
+                break;
+              }
+              auto now = std::chrono::system_clock::now();
+              time_t now_c = std::chrono::system_clock::to_time_t(now);
+              tm now_tm = *std::localtime(&now_c);
+              char buf[20];
+              strftime(buf, sizeof(buf), "%Y%m%d", &now_tm);
+              std::string today = buf;
+
+              std::string video_path = recorder.getVideoPathForDate(today);
+
+              if (!std::filesystem::exists(video_path) ||
+                  std::filesystem::file_size(video_path) <= 48) {
+                for (int i = 1; i <= 7; ++i) {
+                  auto date = now - std::chrono::hours(24 * i);
+                  time_t date_c = std::chrono::system_clock::to_time_t(date);
+                  tm date_tm = *std::localtime(&date_c);
+                  char date_buf[20];
+                  strftime(date_buf, sizeof(date_buf), "%Y%m%d", &date_tm);
+                  std::string date_str = date_buf;
+
+                  std::string path = recorder.getVideoPathForDate(date_str);
+                  if (std::filesystem::exists(path) &&
+                      std::filesystem::file_size(path) > 48) {
+                    video_path = path;
+                    break;
+                  }
+                }
+              }
+
+              if (video_path.empty() || !std::filesystem::exists(video_path) ||
+                  std::filesystem::file_size(video_path) <= 48) {
+                sendVkMessage(bot_vk, peer_id, "Нет записанных видео");
+              } else {
+                try {
+                  if (recorder.isRecording()) {
+                    recorder.stopRecording();
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                    recorder.startRecording();
+                  }
+                  sendVkDocument(bot_vk, peer_id, video_path, "video/mp4");
+                } catch (const std::exception &e) {
+                  std::cerr << "Ошибка отправки видео VK: " << e.what()
+                            << std::endl;
+                  sendVkMessage(bot_vk, peer_id,
+                                "❌ Ошибка отправки видео: " +
+                                    std::string(e.what()));
+                }
+              }
+            } else if (cmd == "/unstopable") {
+              int64_t uid = peer_id;
+              if (uid != authorizedUserId.load()) {
+                sendVkMessage(bot_vk, peer_id, "⛔ У вас нет доступа.");
+                break;
+              }
+              if (arg == "on") {
+                unstopable_mode = true;
+                {
+                  std::lock_guard<std::mutex> lock(settings_mutex);
+                  settings.unstopable_mode = true;
+                  settings.save(settings_path);
+                }
+                sendVkMessage(bot_vk, peer_id,
+                              "🔄 Режим непрерывной записи ВКЛЮЧЕН");
+              } else if (arg == "off") {
+                unstopable_mode = false;
+                {
+                  std::lock_guard<std::mutex> lock(settings_mutex);
+                  settings.unstopable_mode = false;
+                  settings.save(settings_path);
+                }
+                sendVkMessage(bot_vk, peer_id,
+                              "🔄 Режим непрерывной записи ВЫКЛЮЧЕН");
+              } else {
+                sendVkMessage(
+                    bot_vk, peer_id,
+                    "Использование: /unstopable on или /unstopable off");
+              }
+            } else if (cmd == "/status") {
+              int64_t uid = peer_id;
+              if (uid != authorizedUserId.load()) {
+                sendVkMessage(bot_vk, peer_id, "⛔ У вас нет доступа.");
+                break;
+              }
+              std::string status = "📊 Статус системы:\n";
+              status += "Запись: " +
+                        std::string(recorder.isRecording() ? "✅ активна"
+                                                           : "❌ неактивна") +
+                        "\n";
+              status += "Режим: " +
+                        std::string(unstopable_mode.load()
+                                        ? "🔄 непрерывная запись"
+                                        : "🎯 запись при обнаружении") +
+                        "\n";
+              status += "Детекция: " +
+                        std::string(flag_detection.load() ? "✅ активна"
+                                                          : "❌ отключена") +
+                        "\n";
+              status += "Лица: " +
+                        std::string(flag_face.load() ? "✅ активна"
+                                                     : "❌ отключена") +
+                        "\n";
+              status += "Эффекты: " +
+                        std::string(flag_effects.load() ? "✅ включены"
+                                                        : "❌ отключены") +
+                        "\n";
+              status += "Звук: " +
+                        std::string(flag_sound.load() ? "✅ включён"
+                                                      : "❌ отключён") +
+                        "\n";
+              status += "Очистка: " +
+                        std::string(flag_cleanup.load() ? "✅ активна"
+                                                        : "❌ отключена") +
+                        "\n";
+              status +=
+                  "Люди в кадре: " +
+                  std::string(detection_active.load() ? "⚠️ обнаружены"
+                                                      : "✅ не обнаружены") +
+                  "\n";
+              status += "Уведомления: " +
+                        std::string(alert_enabled.load() ? "🔔 включены"
+                                                         : "🔕 выключены") +
+                        "\n";
+              status +=
+                  "Авторизован: ID " + std::to_string(authorizedUserId.load());
+              sendVkMessage(bot_vk, peer_id, status);
+            } else if (cmd == "/cpuinfo") {
+              int64_t uid = peer_id;
+              if (uid != authorizedUserId.load()) {
+                sendVkMessage(bot_vk, peer_id, "⛔ У вас нет доступа.");
+                break;
+              }
+              auto info = readFile("/proc/cpuinfo");
+              if (info.empty()) {
+                sendVkMessage(bot_vk, peer_id,
+                              "❌ Не удалось прочитать /proc/cpuinfo");
+              } else {
+                if (info.size() < 3500) {
+                  sendVkMessage(bot_vk, peer_id, info);
+                } else {
+                  std::string tmp = "/tmp/cpuinfo.txt";
+                  std::ofstream(tmp) << info;
+                  sendVkDocument(bot_vk, peer_id, tmp, "text/plain");
+                  std::filesystem::remove(tmp);
+                }
+              }
+            } else if (cmd == "/temp") {
+              int64_t uid = peer_id;
+              if (uid != authorizedUserId.load()) {
+                sendVkMessage(bot_vk, peer_id, "⛔ У вас нет доступа.");
+                break;
+              }
+              std::ostringstream report;
+              bool found = false;
+              // Копируем код формирования температуры из Telegram (он
+              // универсален)
+              const std::filesystem::path thermalDir{"/sys/class/thermal"};
+              if (std::filesystem::exists(thermalDir) &&
+                  std::filesystem::is_directory(thermalDir)) {
+                for (auto &entry :
+                     std::filesystem::directory_iterator(thermalDir)) {
+                  auto name = entry.path().filename().string();
+                  if (name.rfind("thermal_zone", 0) != 0)
+                    continue;
+                  std::filesystem::path typeFile = entry.path() / "type";
+                  std::filesystem::path tempFile = entry.path() / "temp";
+                  if (!std::filesystem::exists(typeFile) ||
+                      !std::filesystem::exists(tempFile))
+                    continue;
+                  std::string typeStr, tempStr;
+                  std::ifstream(typeFile) >> typeStr;
+                  std::ifstream(tempFile) >> tempStr;
+                  try {
+                    double tc = std::stod(tempStr) / 1000.0;
+                    report << "[" << name << "] " << typeStr << ": "
+                           << std::fixed << std::setprecision(2) << tc
+                           << " °C\n";
+                    found = true;
+                  } catch (...) {
+                    report << "[" << name << "] " << typeStr << ": invalid ("
+                           << tempStr << ")\n";
+                    found = true;
+                  }
+                }
+              }
+              const std::filesystem::path hwmonDir{"/sys/class/hwmon"};
+              if (std::filesystem::exists(hwmonDir) &&
+                  std::filesystem::is_directory(hwmonDir)) {
+                for (auto &entry :
+                     std::filesystem::directory_iterator(hwmonDir)) {
+                  std::string chip;
+                  std::filesystem::path nameFile = entry.path() / "name";
+                  if (std::filesystem::exists(nameFile)) {
+                    std::ifstream(nameFile) >> chip;
+                  } else {
+                    chip = entry.path().filename().string();
+                  }
+                  for (auto &f :
+                       std::filesystem::directory_iterator(entry.path())) {
+                    auto fname = f.path().filename().string();
+                    if (fname.rfind("temp", 0) != 0 ||
+                        fname.find("_input") == std::string::npos)
+                      continue;
+                    std::string idx = fname.substr(4, fname.find("_input") - 4);
+                    std::filesystem::path inFile = f.path();
+                    std::filesystem::path labelFile =
+                        entry.path() / ("temp" + idx + "_label");
+                    std::string tempStr, label;
+                    std::ifstream(inFile) >> tempStr;
+                    if (std::filesystem::exists(labelFile)) {
+                      std::getline(std::ifstream(labelFile), label);
+                    } else {
+                      label = "temp" + idx;
+                    }
+                    try {
+                      double tc = std::stod(tempStr) / 1000.0;
+                      report << "[" << entry.path().filename() << "] " << chip
+                             << " " << label << ": " << std::fixed
+                             << std::setprecision(2) << tc << " °C\n";
+                      found = true;
+                    } catch (...) {
+                      report << "[" << entry.path().filename() << "] " << chip
+                             << " " << label << ": invalid (" << tempStr
+                             << ")\n";
+                      found = true;
+                    }
+                  }
+                }
+              }
+              if (!found)
+                sendVkMessage(bot_vk, peer_id,
+                              "❌ Не найден ни один температурный датчик.");
+              else
+                sendVkMessage(bot_vk, peer_id, report.str());
+            } else if (cmd == "/logs") {
+              int64_t uid = peer_id;
+              if (uid != authorizedUserId.load()) {
+                sendVkMessage(bot_vk, peer_id, "⛔ У вас нет доступа.");
+                break;
+              }
+              auto logPath = getLogFilePath();
+              if (!std::filesystem::exists(logPath)) {
+                sendVkMessage(bot_vk, peer_id, "📄 Лог за сегодня не найден");
+              } else {
+                sendVkDocument(bot_vk, peer_id, logPath.string(), "text/plain");
+              }
+            } else {
+              sendVkMessage(bot_vk, peer_id, "❓ Неизвестная команда");
+            }
+          } else {
+            // Обычное сообщение — приветствие
+            vk::base::JsonType params;
+            params["peer_id"] = std::to_string(peer_id);
+            params["message"] = "Вы написали: " + text + "\nЯ вас приветствую!";
+            params["random_id"] = std::to_string(generate_random_id());
+            auto response = bot_vk.SendRequest(
+                vk::base::bot::BotBase::METHODS::SEND_MESSAGE, params);
+            if (response.contains("error"))
+              std::cerr << "Ошибка отправки VK: " << response.dump()
+                        << std::endl;
+          }
+          break;
+        }
+
+        case vk::base::bot::BotBase::EVENTS::GROUP_JOIN: {
+          std::cout << "Новый участник вступил!" << std::endl;
+          if (!event.parameters.contains("user_id") ||
+              !event.parameters["user_id"].is_number_integer()) {
+            std::cerr << "user_id not found or not integer" << std::endl;
+            break;
+          }
+          auto user_id = event.parameters["user_id"].get<int64_t>();
+
+          vk::base::JsonType params;
+          params["peer_id"] = std::to_string(user_id);
+          params["message"] =
+              "Привет, новый участник! Добро пожаловать в нашу группу!";
+          params["random_id"] = std::to_string(generate_random_id());
+
+          auto response = bot_vk.SendRequest(
+              vk::base::bot::BotBase::METHODS::SEND_MESSAGE, params);
+          if (response.contains("error"))
+            std::cerr << "Ошибка отправки VK: " << response.dump() << std::endl;
+          break;
+        }
+
+        default:
+          break;
+        }
+      }
+    } catch (const std::exception &e) {
+      std::cerr << "\nVK thread error: " << e.what()
+                << " — reconnecting in 3s..." << std::endl;
+      std::this_thread::sleep_for(std::chrono::seconds(3));
+    }
+  }
+  std::cout << "VK thread finished" << std::endl;
+}
+
 int main(int argc, char *argv[]) {
   std::signal(SIGINT, signalHandler);
   std::signal(SIGTERM, signalHandler);
@@ -74,9 +844,9 @@ int main(int argc, char *argv[]) {
 
   std::shared_ptr<Utility::DebugServer::DebugServer> debug_server;
   if (flags.debug_server) {
-    debug_server = std::make_shared<Utility::DebugServer::DebugServer>(flags.debug_port);
+    debug_server =
+        std::make_shared<Utility::DebugServer::DebugServer>(flags.debug_port);
     debug_server->start();
-    
   }
 
   flag_recording = flags.recording;
@@ -109,367 +879,381 @@ int main(int argc, char *argv[]) {
   alert_enabled = settings.alert_enabled;
   unstopable_mode = settings.unstopable_mode;
 
-  TgBot::Bot bot(TG_API_TOKEN);
+  // TgBot::Bot bot(TG_API_TOKEN);
   ObserverLoop::VideoRecorder recorder(video_dir);
 
-  std::thread video_thread(video_processing_thread, &bot, std::ref(recorder),
+  std::thread video_thread(video_processing_thread, nullptr, std::ref(recorder),
                            std::ref(settings), flags);
 
-  bot.getEvents().onCommand("start", [&](TgBot::Message::Ptr message) {
-    auto user = message->from;
-    auto uid = user->id;
-    auto uname = user->username.empty() ? "<no-username>" : user->username;
-    if (authorizedUserId == 0) {
-      authorizedUserId = uid;
-      settings.authorizedUserId = uid;
-      {
-        std::lock_guard<std::mutex> lock(settings_mutex);
-        settings.save(settings_path);
-      }
-      logMsg("🔓 Доступ выдан: " + uname + " (ID:" + std::to_string(uid) + ")");
-      bot.getApi().sendMessage(message->chat->id,
-                               "✅ Вы авторизованы!\nВаш ID: " +
-                                   std::to_string(uid));
-    } else if (uid == authorizedUserId) {
-      bot.getApi().sendMessage(message->chat->id, "ℹ️ Вы уже авторизованы.");
-    } else {
-      logMsg("❌ Попытка /start от неразрешённого: " + uname +
-             " (ID:" + std::to_string(uid) + ")");
-      bot.getApi().sendMessage(message->chat->id,
-                               "⛔ Доступ имеет только первый обратившийся.");
-    }
-  });
+  std::thread vk_thread(vk_bot_thread, std::ref(settings), std::ref(recorder));
 
-  bot.getEvents().onCommand("photo", [&](TgBot::Message::Ptr message) {
-    auto uid = message->from->id;
-    if (uid != authorizedUserId) {
-      bot.getApi().sendMessage(message->chat->id, "⛔ У вас нет доступа.");
-      return;
-    }
-    cv::Mat frame_copy;
-    {
-      std::lock_guard<std::mutex> lock(frame_mutex);
-      if (last_frame.empty()) {
-        bot.getApi().sendMessage(message->chat->id, "⚠️ Нет данных с камеры.");
-        return;
-      }
-      frame_copy = last_frame.clone();
-    }
-    auto now = std::chrono::system_clock::now();
-    auto t = std::chrono::system_clock::to_time_t(now);
-    std::ostringstream fn;
-    fn << std::put_time(std::localtime(&t), "%Y%m%d%H%M%S") << ".jpg";
-    std::filesystem::path tmp =
-        std::filesystem::temp_directory_path() / fn.str();
-    if (!cv::imwrite(tmp.string(), frame_copy)) {
-      bot.getApi().sendMessage(message->chat->id,
-                               "❌ Ошибка сохранения кадра.");
-      return;
-    }
-    bot.getApi().sendPhoto(message->chat->id, TgBot::InputFile::fromFile(
-                                                  tmp.string(), "image/jpeg"));
-    std::filesystem::remove(tmp);
-  });
+  // bot.getEvents().onCommand("start", [&](TgBot::Message::Ptr message) {
+  //   auto user = message->from;
+  //   auto uid = user->id;
+  //   auto uname = user->username.empty() ? "<no-username>" : user->username;
+  //   if (authorizedUserId == 0) {
+  //     authorizedUserId = uid;
+  //     settings.authorizedUserId = uid;
+  //     {
+  //       std::lock_guard<std::mutex> lock(settings_mutex);
+  //       settings.save(settings_path);
+  //     }
+  //     logMsg("🔓 Доступ выдан: " + uname + " (ID:" + std::to_string(uid) +
+  //     ")"); bot.getApi().sendMessage(message->chat->id,
+  //                              "✅ Вы авторизованы!\nВаш ID: " +
+  //                                  std::to_string(uid));
+  //   } else if (uid == authorizedUserId) {
+  //     bot.getApi().sendMessage(message->chat->id, "ℹ️ Вы уже авторизованы.");
+  //   } else {
+  //     logMsg("❌ Попытка /start от неразрешённого: " + uname +
+  //            " (ID:" + std::to_string(uid) + ")");
+  //     bot.getApi().sendMessage(message->chat->id,
+  //                              "⛔ Доступ имеет только первый
+  //                              обратившийся.");
+  //   }
+  // });
 
-  bot.getEvents().onCommand("alert", [&](TgBot::Message::Ptr message) {
-    auto uid = message->from->id;
-    if (uid != authorizedUserId) {
-      bot.getApi().sendMessage(message->chat->id, "⛔ У вас нет доступа.");
-      return;
-    }
-    std::string text = message->text;
-    std::string arg;
-    size_t pos = text.find(' ');
-    if (pos != std::string::npos) {
-      arg = text.substr(pos + 1);
-    }
-    if (arg == "on") {
-      alert_enabled = true;
-      settings.alert_enabled = true;
-      {
-        std::lock_guard<std::mutex> lock(settings_mutex);
-        settings.save(settings_path);
-      }
-      bot.getApi().sendMessage(message->chat->id, "🔔 Уведомления включены");
-    } else if (arg == "off") {
-      alert_enabled = false;
-      settings.alert_enabled = false;
-      {
-        std::lock_guard<std::mutex> lock(settings_mutex);
-        settings.save(settings_path);
-      }
-      bot.getApi().sendMessage(message->chat->id, "🔕 Уведомления выключены");
-    } else {
-      bot.getApi().sendMessage(message->chat->id,
-                               "Использование: /alert on или /alert off");
-    }
-  });
+  // bot.getEvents().onCommand("photo", [&](TgBot::Message::Ptr message) {
+  //   auto uid = message->from->id;
+  //   if (uid != authorizedUserId) {
+  //     bot.getApi().sendMessage(message->chat->id, "⛔ У вас нет доступа.");
+  //     return;
+  //   }
+  //   cv::Mat frame_copy;
+  //   {
+  //     std::lock_guard<std::mutex> lock(frame_mutex);
+  //     if (last_frame.empty()) {
+  //       bot.getApi().sendMessage(message->chat->id, "⚠️ Нет данных с
+  //       камеры."); return;
+  //     }
+  //     frame_copy = last_frame.clone();
+  //   }
+  //   auto now = std::chrono::system_clock::now();
+  //   auto t = std::chrono::system_clock::to_time_t(now);
+  //   std::ostringstream fn;
+  //   fn << std::put_time(std::localtime(&t), "%Y%m%d%H%M%S") << ".jpg";
+  //   std::filesystem::path tmp =
+  //       std::filesystem::temp_directory_path() / fn.str();
+  //   if (!cv::imwrite(tmp.string(), frame_copy)) {
+  //     bot.getApi().sendMessage(message->chat->id,
+  //                              "❌ Ошибка сохранения кадра.");
+  //     return;
+  //   }
+  //   bot.getApi().sendPhoto(message->chat->id, TgBot::InputFile::fromFile(
+  //                                                 tmp.string(),
+  //                                                 "image/jpeg"));
+  //   std::filesystem::remove(tmp);
+  // });
 
-  bot.getEvents().onCommand("last", [&](TgBot::Message::Ptr message) {
-    auto uid = message->from->id;
-    if (uid != authorizedUserId) {
-      bot.getApi().sendMessage(message->chat->id, "⛔ У вас нет доступа.");
-      return;
-    }
+  // bot.getEvents().onCommand("alert", [&](TgBot::Message::Ptr message) {
+  //   auto uid = message->from->id;
+  //   if (uid != authorizedUserId) {
+  //     bot.getApi().sendMessage(message->chat->id, "⛔ У вас нет доступа.");
+  //     return;
+  //   }
+  //   std::string text = message->text;
+  //   std::string arg;
+  //   size_t pos = text.find(' ');
+  //   if (pos != std::string::npos) {
+  //     arg = text.substr(pos + 1);
+  //   }
+  //   if (arg == "on") {
+  //     alert_enabled = true;
+  //     settings.alert_enabled = true;
+  //     {
+  //       std::lock_guard<std::mutex> lock(settings_mutex);
+  //       settings.save(settings_path);
+  //     }
+  //     bot.getApi().sendMessage(message->chat->id, "🔔 Уведомления включены");
+  //   } else if (arg == "off") {
+  //     alert_enabled = false;
+  //     settings.alert_enabled = false;
+  //     {
+  //       std::lock_guard<std::mutex> lock(settings_mutex);
+  //       settings.save(settings_path);
+  //     }
+  //     bot.getApi().sendMessage(message->chat->id, "🔕 Уведомления
+  //     выключены");
+  //   } else {
+  //     bot.getApi().sendMessage(message->chat->id,
+  //                              "Использование: /alert on или /alert off");
+  //   }
+  // });
 
-    if (!flag_recording) {
-      bot.getApi().sendMessage(
-          message->chat->id, "⚠️ Запись видео отключена (флаг --no-recording).");
-      return;
-    }
+  // bot.getEvents().onCommand("last", [&](TgBot::Message::Ptr message) {
+  //   auto uid = message->from->id;
+  //   if (uid != authorizedUserId) {
+  //     bot.getApi().sendMessage(message->chat->id, "⛔ У вас нет доступа.");
+  //     return;
+  //   }
 
-    auto now = std::chrono::system_clock::now();
-    time_t now_c = std::chrono::system_clock::to_time_t(now);
-    tm now_tm = *std::localtime(&now_c);
-    char buf[20];
-    strftime(buf, sizeof(buf), "%Y%m%d", &now_tm);
-    std::string today = buf;
+  //   if (!flag_recording) {
+  //     bot.getApi().sendMessage(
+  //         message->chat->id, "⚠️ Запись видео отключена (флаг
+  //         --no-recording).");
+  //     return;
+  //   }
 
-    std::string video_path = recorder.getVideoPathForDate(today);
+  auto now = std::chrono::system_clock::now();
+  time_t now_c = std::chrono::system_clock::to_time_t(now);
+  tm now_tm = *std::localtime(&now_c);
+  char buf[20];
+  strftime(buf, sizeof(buf), "%Y%m%d", &now_tm);
+  std::string today = buf;
 
-    if (!std::filesystem::exists(video_path) ||
-        std::filesystem::file_size(video_path) <= 48) {
-      for (int i = 1; i <= 7; ++i) {
-        auto date = now - std::chrono::hours(24 * i);
-        time_t date_c = std::chrono::system_clock::to_time_t(date);
-        tm date_tm = *std::localtime(&date_c);
-        char date_buf[20];
-        strftime(date_buf, sizeof(date_buf), "%Y%m%d", &date_tm);
-        std::string date_str = date_buf;
+  std::string video_path = recorder.getVideoPathForDate(today);
 
-        std::string path = recorder.getVideoPathForDate(date_str);
-        if (std::filesystem::exists(path) &&
-            std::filesystem::file_size(path) > 48) {
-          video_path = path;
-          break;
-        }
-      }
-    }
+  if (!std::filesystem::exists(video_path) ||
+      std::filesystem::file_size(video_path) <= 48) {
+    for (int i = 1; i <= 7; ++i) {
+      auto date = now - std::chrono::hours(24 * i);
+      time_t date_c = std::chrono::system_clock::to_time_t(date);
+      tm date_tm = *std::localtime(&date_c);
+      char date_buf[20];
+      strftime(date_buf, sizeof(date_buf), "%Y%m%d", &date_tm);
+      std::string date_str = date_buf;
 
-    if (video_path.empty() || !std::filesystem::exists(video_path) ||
-        std::filesystem::file_size(video_path) <= 48) {
-      bot.getApi().sendMessage(message->chat->id, "Нет записанных видео");
-    } else {
-      try {
-        if (recorder.isRecording()) {
-          recorder.stopRecording();
-          std::this_thread::sleep_for(std::chrono::seconds(1));
-          recorder.startRecording();
-        }
-
-        bot.getApi().sendDocument(
-            message->chat->id,
-            TgBot::InputFile::fromFile(video_path, "video/mp4"));
-      } catch (const std::exception &e) {
-        std::cerr << "Ошибка отправки видео: " << e.what() << std::endl;
-        bot.getApi().sendMessage(message->chat->id,
-                                 "❌ Ошибка отправки видео: " +
-                                     std::string(e.what()));
+      std::string path = recorder.getVideoPathForDate(date_str);
+      if (std::filesystem::exists(path) &&
+          std::filesystem::file_size(path) > 48) {
+        video_path = path;
+        break;
       }
     }
-  });
-
-  bot.getEvents().onCommand("unstopable", [&](TgBot::Message::Ptr message) {
-    auto uid = message->from->id;
-    if (uid != authorizedUserId) {
-      bot.getApi().sendMessage(message->chat->id, "⛔ У вас нет доступа.");
-      return;
-    }
-    std::string text = message->text;
-    std::string arg;
-    size_t pos = text.find(' ');
-    if (pos != std::string::npos) {
-      arg = text.substr(pos + 1);
-    }
-    if (arg == "on") {
-      unstopable_mode = true;
-      settings.unstopable_mode = true;
-      {
-        std::lock_guard<std::mutex> lock(settings_mutex);
-        settings.save(settings_path);
-      }
-      bot.getApi().sendMessage(message->chat->id,
-                               "🔄 Режим непрерывной записи ВКЛЮЧЕН");
-    } else if (arg == "off") {
-      unstopable_mode = false;
-      settings.unstopable_mode = false;
-      {
-        std::lock_guard<std::mutex> lock(settings_mutex);
-        settings.save(settings_path);
-      }
-      bot.getApi().sendMessage(message->chat->id,
-                               "🔄 Режим непрерывной записи ВЫКЛЮЧЕН");
-    } else {
-      bot.getApi().sendMessage(
-          message->chat->id,
-          "Использование: /unstopable on или /unstopable off");
-    }
-  });
-
-  bot.getEvents().onCommand("status", [&](TgBot::Message::Ptr message) {
-    auto uid = message->from->id;
-    if (uid != authorizedUserId) {
-      bot.getApi().sendMessage(message->chat->id, "⛔ У вас нет доступа.");
-      return;
-    }
-    std::string status = "📊 Статус системы:\n";
-    status +=
-        "Запись: " +
-        std::string(recorder.isRecording() ? "✅ активна" : "❌ неактивна") +
-        "\n";
-
-    if (unstopable_mode) {
-      status += "Режим: 🔄 непрерывная запись\n";
-    } else {
-      status += "Режим: 🎯 запись при обнаружении\n";
-    }
-
-    status += "Детекция: " +
-              std::string(flag_detection ? "✅ активна" : "❌ отключена") +
-              "\n";
-    status +=
-        "Лица: " + std::string(flag_face ? "✅ активна" : "❌ отключена") +
-        "\n";
-    status += "Эффекты: " +
-              std::string(flag_effects ? "✅ включены" : "❌ отключены") + "\n";
-    status +=
-        "Звук: " + std::string(flag_sound ? "✅ включён" : "❌ отключён") +
-        "\n";
-    status += "Очистка: " +
-              std::string(flag_cleanup ? "✅ активна" : "❌ отключена") + "\n";
-    status +=
-        "Люди в кадре: " +
-        std::string(detection_active ? "⚠️ обнаружены" : "✅ не обнаружены") +
-        "\n";
-    status += "Уведомления: " +
-              std::string(alert_enabled ? "🔔 включены" : "🔕 выключены") +
-              "\n";
-    status += "Авторизован: ID " + std::to_string(authorizedUserId);
-    bot.getApi().sendMessage(message->chat->id, status);
-  });
-
-  bot.getEvents().onCommand("cpuinfo", [&](TgBot::Message::Ptr message) {
-    auto info = readFile("/proc/cpuinfo");
-    if (info.empty()) {
-      bot.getApi().sendMessage(message->chat->id,
-                               "❌ Не удалось прочитать /proc/cpuinfo");
-    } else {
-      if (info.size() < 3500) {
-        bot.getApi().sendMessage(message->chat->id, info);
-      } else {
-        std::string tmp = "/tmp/cpuinfo.txt";
-        std::ofstream(tmp) << info;
-        bot.getApi().sendDocument(
-            message->chat->id, TgBot::InputFile::fromFile(tmp, "text/plain"));
-        std::filesystem::remove(tmp);
-      }
-    }
-  });
-
-  bot.getEvents().onCommand("temp", [&](TgBot::Message::Ptr message) {
-    std::ostringstream report;
-    bool found = false;
-    const std::filesystem::path thermalDir{"/sys/class/thermal"};
-    if (std::filesystem::exists(thermalDir) &&
-        std::filesystem::is_directory(thermalDir)) {
-      for (auto &entry : std::filesystem::directory_iterator(thermalDir)) {
-        auto name = entry.path().filename().string();
-        if (name.rfind("thermal_zone", 0) != 0)
-          continue;
-        std::filesystem::path typeFile = entry.path() / "type";
-        std::filesystem::path tempFile = entry.path() / "temp";
-        if (!std::filesystem::exists(typeFile) ||
-            !std::filesystem::exists(tempFile))
-          continue;
-        std::string typeStr, tempStr;
-        std::ifstream(typeFile) >> typeStr;
-        std::ifstream(tempFile) >> tempStr;
-        try {
-          double tc = std::stod(tempStr) / 1000.0;
-          report << "[" << name << "] " << typeStr << ": " << std::fixed
-                 << std::setprecision(2) << tc << " °C\n";
-          found = true;
-        } catch (...) {
-          report << "[" << name << "] " << typeStr << ": invalid (" << tempStr
-                 << ")\n";
-          found = true;
-        }
-      }
-    }
-    const std::filesystem::path hwmonDir{"/sys/class/hwmon"};
-    if (std::filesystem::exists(hwmonDir) &&
-        std::filesystem::is_directory(hwmonDir)) {
-      for (auto &entry : std::filesystem::directory_iterator(hwmonDir)) {
-        std::string chip;
-        std::filesystem::path nameFile = entry.path() / "name";
-        if (std::filesystem::exists(nameFile)) {
-          std::ifstream(nameFile) >> chip;
-        } else {
-          chip = entry.path().filename().string();
-        }
-        for (auto &f : std::filesystem::directory_iterator(entry.path())) {
-          auto fname = f.path().filename().string();
-          if (fname.rfind("temp", 0) != 0 ||
-              fname.find("_input") == std::string::npos)
-            continue;
-          std::string idx = fname.substr(4, fname.find("_input") - 4);
-          std::filesystem::path inFile = f.path();
-          std::filesystem::path labelFile =
-              entry.path() / ("temp" + idx + "_label");
-          std::string tempStr, label;
-          std::ifstream(inFile) >> tempStr;
-          if (std::filesystem::exists(labelFile)) {
-            std::getline(std::ifstream(labelFile), label);
-          } else {
-            label = "temp" + idx;
-          }
-          try {
-            double tc = std::stod(tempStr) / 1000.0;
-            report << "[" << entry.path().filename() << "] " << chip << " "
-                   << label << ": " << std::fixed << std::setprecision(2) << tc
-                   << " °C\n";
-            found = true;
-          } catch (...) {
-            report << "[" << entry.path().filename() << "] " << chip << " "
-                   << label << ": invalid (" << tempStr << ")\n";
-            found = true;
-          }
-        }
-      }
-    }
-    if (!found) {
-      bot.getApi().sendMessage(message->chat->id,
-                               "❌ Не найден ни один температурный датчик.");
-    } else {
-      bot.getApi().sendMessage(message->chat->id, report.str());
-    }
-  });
-
-  bot.getEvents().onCommand("logs", [&](TgBot::Message::Ptr message) {
-    auto logPath = getLogFilePath();
-    if (!std::filesystem::exists(logPath)) {
-      bot.getApi().sendMessage(message->chat->id,
-                               "📄 Лог за сегодня не найден");
-    } else {
-      bot.getApi().sendDocument(
-          message->chat->id,
-          TgBot::InputFile::fromFile(logPath.string(), "text/plain"));
-    }
-  });
-
-  try {
-    std::cout << "Bot username: " << bot.getApi().getMe()->username
-              << std::endl;
-    TgBot::TgLongPoll longPoll(bot);
-    while (running) {
-      longPoll.start();
-    }
-  } catch (std::exception &e) {
-    std::cerr << "Error: " << e.what() << std::endl;
-    logMsg("🛑 Exception: " + std::string(e.what()));
   }
 
+  //   if (video_path.empty() || !std::filesystem::exists(video_path) ||
+  //       std::filesystem::file_size(video_path) <= 48) {
+  //     bot.getApi().sendMessage(message->chat->id, "Нет записанных видео");
+  //   } else {
+  //     try {
+  //       if (recorder.isRecording()) {
+  //         recorder.stopRecording();
+  //         std::this_thread::sleep_for(std::chrono::seconds(1));
+  //         recorder.startRecording();
+  //       }
+
+  //       bot.getApi().sendDocument(
+  //           message->chat->id,
+  //           TgBot::InputFile::fromFile(video_path, "video/mp4"));
+  //     } catch (const std::exception &e) {
+  //       std::cerr << "Ошибка отправки видео: " << e.what() << std::endl;
+  //       bot.getApi().sendMessage(message->chat->id,
+  //                                "❌ Ошибка отправки видео: " +
+  //                                    std::string(e.what()));
+  //     }
+  //   }
+  // });
+
+  // bot.getEvents().onCommand("unstopable", [&](TgBot::Message::Ptr message) {
+  //   auto uid = message->from->id;
+  //   if (uid != authorizedUserId) {
+  //     bot.getApi().sendMessage(message->chat->id, "⛔ У вас нет доступа.");
+  //     return;
+  //   }
+  //   std::string text = message->text;
+  //   std::string arg;
+  //   size_t pos = text.find(' ');
+  //   if (pos != std::string::npos) {
+  //     arg = text.substr(pos + 1);
+  //   }
+  //   if (arg == "on") {
+  //     unstopable_mode = true;
+  //     settings.unstopable_mode = true;
+  //     {
+  //       std::lock_guard<std::mutex> lock(settings_mutex);
+  //       settings.save(settings_path);
+  //     }
+  //     bot.getApi().sendMessage(message->chat->id,
+  //                              "🔄 Режим непрерывной записи ВКЛЮЧЕН");
+  //   } else if (arg == "off") {
+  //     unstopable_mode = false;
+  //     settings.unstopable_mode = false;
+  //     {
+  //       std::lock_guard<std::mutex> lock(settings_mutex);
+  //       settings.save(settings_path);
+  //     }
+  //     bot.getApi().sendMessage(message->chat->id,
+  //                              "🔄 Режим непрерывной записи ВЫКЛЮЧЕН");
+  //   } else {
+  //     bot.getApi().sendMessage(
+  //         message->chat->id,
+  //         "Использование: /unstopable on или /unstopable off");
+  //   }
+  // });
+
+  // bot.getEvents().onCommand("status", [&](TgBot::Message::Ptr message) {
+  //   auto uid = message->from->id;
+  //   if (uid != authorizedUserId) {
+  //     bot.getApi().sendMessage(message->chat->id, "⛔ У вас нет доступа.");
+  //     return;
+  //   }
+  //   std::string status = "📊 Статус системы:\n";
+  //   status +=
+  //       "Запись: " +
+  //       std::string(recorder.isRecording() ? "✅ активна" : "❌ неактивна") +
+  //       "\n";
+
+  //   if (unstopable_mode) {
+  //     status += "Режим: 🔄 непрерывная запись\n";
+  //   } else {
+  //     status += "Режим: 🎯 запись при обнаружении\n";
+  //   }
+
+  //   status += "Детекция: " +
+  //             std::string(flag_detection ? "✅ активна" : "❌ отключена") +
+  //             "\n";
+  //   status +=
+  //       "Лица: " + std::string(flag_face ? "✅ активна" : "❌ отключена") +
+  //       "\n";
+  //   status += "Эффекты: " +
+  //             std::string(flag_effects ? "✅ включены" : "❌ отключены") +
+  //             "\n";
+  //   status +=
+  //       "Звук: " + std::string(flag_sound ? "✅ включён" : "❌ отключён") +
+  //       "\n";
+  //   status += "Очистка: " +
+  //             std::string(flag_cleanup ? "✅ активна" : "❌ отключена") +
+  //             "\n";
+  //   status +=
+  //       "Люди в кадре: " +
+  //       std::string(detection_active ? "⚠️ обнаружены" : "✅ не обнаружены") +
+  //       "\n";
+  //   status += "Уведомления: " +
+  //             std::string(alert_enabled ? "🔔 включены" : "🔕 выключены") +
+  //             "\n";
+  //   status += "Авторизован: ID " + std::to_string(authorizedUserId);
+  //   bot.getApi().sendMessage(message->chat->id, status);
+  // });
+
+  // bot.getEvents().onCommand("cpuinfo", [&](TgBot::Message::Ptr message) {
+  //   auto info = readFile("/proc/cpuinfo");
+  //   if (info.empty()) {
+  //     bot.getApi().sendMessage(message->chat->id,
+  //                              "❌ Не удалось прочитать /proc/cpuinfo");
+  //   } else {
+  //     if (info.size() < 3500) {
+  //       bot.getApi().sendMessage(message->chat->id, info);
+  //     } else {
+  //       std::string tmp = "/tmp/cpuinfo.txt";
+  //       std::ofstream(tmp) << info;
+  //       bot.getApi().sendDocument(
+  //           message->chat->id, TgBot::InputFile::fromFile(tmp,
+  //           "text/plain"));
+  //       std::filesystem::remove(tmp);
+  //     }
+  //   }
+  // });
+
+  // bot.getEvents().onCommand("temp", [&](TgBot::Message::Ptr message) {
+  //   std::ostringstream report;
+  //   bool found = false;
+  //   const std::filesystem::path thermalDir{"/sys/class/thermal"};
+  //   if (std::filesystem::exists(thermalDir) &&
+  //       std::filesystem::is_directory(thermalDir)) {
+  //     for (auto &entry : std::filesystem::directory_iterator(thermalDir)) {
+  //       auto name = entry.path().filename().string();
+  //       if (name.rfind("thermal_zone", 0) != 0)
+  //         continue;
+  //       std::filesystem::path typeFile = entry.path() / "type";
+  //       std::filesystem::path tempFile = entry.path() / "temp";
+  //       if (!std::filesystem::exists(typeFile) ||
+  //           !std::filesystem::exists(tempFile))
+  //         continue;
+  //       std::string typeStr, tempStr;
+  //       std::ifstream(typeFile) >> typeStr;
+  //       std::ifstream(tempFile) >> tempStr;
+  //       try {
+  //         double tc = std::stod(tempStr) / 1000.0;
+  //         report << "[" << name << "] " << typeStr << ": " << std::fixed
+  //                << std::setprecision(2) << tc << " °C\n";
+  //         found = true;
+  //       } catch (...) {
+  //         report << "[" << name << "] " << typeStr << ": invalid (" <<
+  //         tempStr
+  //                << ")\n";
+  //         found = true;
+  //       }
+  //     }
+  //   }
+  //   const std::filesystem::path hwmonDir{"/sys/class/hwmon"};
+  //   if (std::filesystem::exists(hwmonDir) &&
+  //       std::filesystem::is_directory(hwmonDir)) {
+  //     for (auto &entry : std::filesystem::directory_iterator(hwmonDir)) {
+  //       std::string chip;
+  //       std::filesystem::path nameFile = entry.path() / "name";
+  //       if (std::filesystem::exists(nameFile)) {
+  //         std::ifstream(nameFile) >> chip;
+  //       } else {
+  //         chip = entry.path().filename().string();
+  //       }
+  //       for (auto &f : std::filesystem::directory_iterator(entry.path())) {
+  //         auto fname = f.path().filename().string();
+  //         if (fname.rfind("temp", 0) != 0 ||
+  //             fname.find("_input") == std::string::npos)
+  //           continue;
+  //         std::string idx = fname.substr(4, fname.find("_input") - 4);
+  //         std::filesystem::path inFile = f.path();
+  //         std::filesystem::path labelFile =
+  //             entry.path() / ("temp" + idx + "_label");
+  //         std::string tempStr, label;
+  //         std::ifstream(inFile) >> tempStr;
+  //         if (std::filesystem::exists(labelFile)) {
+  //           std::getline(std::ifstream(labelFile), label);
+  //         } else {
+  //           label = "temp" + idx;
+  //         }
+  //         try {
+  //           double tc = std::stod(tempStr) / 1000.0;
+  //           report << "[" << entry.path().filename() << "] " << chip << " "
+  //                  << label << ": " << std::fixed << std::setprecision(2) <<
+  //                  tc
+  //                  << " °C\n";
+  //           found = true;
+  //         } catch (...) {
+  //           report << "[" << entry.path().filename() << "] " << chip << " "
+  //                  << label << ": invalid (" << tempStr << ")\n";
+  //           found = true;
+  //         }
+  //       }
+  //     }
+  //   }
+  //   if (!found) {
+  //     bot.getApi().sendMessage(message->chat->id,
+  //                              "❌ Не найден ни один температурный датчик.");
+  //   } else {
+  //     bot.getApi().sendMessage(message->chat->id, report.str());
+  //   }
+  // });
+
+  // bot.getEvents().onCommand("logs", [&](TgBot::Message::Ptr message) {
+  //   auto logPath = getLogFilePath();
+  //   if (!std::filesystem::exists(logPath)) {
+  //     bot.getApi().sendMessage(message->chat->id,
+  //                              "📄 Лог за сегодня не найден");
+  //   } else {
+  //     bot.getApi().sendDocument(
+  //         message->chat->id,
+  //         TgBot::InputFile::fromFile(logPath.string(), "text/plain"));
+  //   }
+  // });
+
+  // try {
+  //   std::cout << "Bot username: " << bot.getApi().getMe()->username
+  //             << std::endl;
+  //   TgBot::TgLongPoll longPoll(bot);
+  //   while (running) {
+  //     longPoll.start();
+  //   }
+  // } catch (std::exception &e) {
+  //   std::cerr << "Error: " << e.what() << std::endl;
+  //   logMsg("🛑 Exception: " + std::string(e.what()));
+  // }
+  while (running) {
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+  }
   running = false;
   video_thread.join();
+  vk_thread.join();
   return 0;
 }

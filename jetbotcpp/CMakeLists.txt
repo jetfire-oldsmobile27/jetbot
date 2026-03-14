@@ -45,6 +45,7 @@ if(ON_SBC)
     set(Boost_NO_WARN_NEW_VERSIONS ON)
     find_package(Boost REQUIRED COMPONENTS system regex json container thread)
     find_package(CURL REQUIRED)
+    find_package(nlohmann_json REQUIRED)
 
     target_link_libraries(${PROJECT_NAME} PRIVATE
         /usr/local/lib/libTgBot.a
@@ -66,6 +67,7 @@ else()
     set(Boost_NO_WARN_NEW_VERSIONS ON)
     find_package(Boost REQUIRED COMPONENTS system regex json container thread)
     find_package(CURL REQUIRED)
+    find_package(VKAPI REQUIRED)
     
     target_link_libraries(${PROJECT_NAME} PRIVATE
         tgbot::tgbot
@@ -75,6 +77,8 @@ else()
         indicators::indicators
         -static-libstdc++
         onnxruntime::onnxruntime
+        VKAPI::VKAPI
+        nlohmann_json::nlohmann_json
     )
 endif()
 
