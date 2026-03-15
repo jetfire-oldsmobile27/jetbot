@@ -33,6 +33,9 @@ extern std::string logs_dir;
 extern std::string settings_path;
 extern std::string resource_dir;
 
+extern const std::string VK_ACCESS_TOKEN;
+extern const std::string VK_GROUP_ID;
+
 // Параметры камеры и детекции (константы)
 const int WIDTH = 640;
 const int HEIGHT = 480;

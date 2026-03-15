@@ -13,6 +13,7 @@ file(GLOB_RECURSE PROJECT_SOURCES
     ${CMAKE_SOURCE_DIR}/src/ObserverLoop/Detection/*.cpp
     ${CMAKE_SOURCE_DIR}/src/Startup/*.cpp
     ${CMAKE_SOURCE_DIR}/src/Tests/*.cpp
+    ${CMAKE_SOURCE_DIR}/src/OutAPI/*.cpp
     ${CMAKE_SOURCE_DIR}/src/*.cpp
 )
 
