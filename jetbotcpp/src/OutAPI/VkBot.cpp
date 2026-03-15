@@ -80,8 +80,7 @@ static void sendVkMessage(vk::base::bot::BotBase &bot, int64_t peer_id,
 static void sendVkPhoto(vk::base::bot::BotBase &bot, int64_t peer_id,
                         const std::string &file_path) {
   try {
-    // 1. Получаем upload_url
-    vk::base::JsonType params;
+        vk::base::JsonType params;
     params["peer_id"] = std::to_string(peer_id);
     auto upload_server =
         bot.SendRequest("photos.getMessagesUploadServer", params);
@@ -102,8 +101,7 @@ static void sendVkPhoto(vk::base::bot::BotBase &bot, int64_t peer_id,
     std::string upload_url =
         upload_server["response"]["upload_url"].get<std::string>();
 
-    // 2. Загружаем файл
-    std::string response = uploadFileToVk(upload_url, file_path, "photo");
+        std::string response = uploadFileToVk(upload_url, file_path, "photo");
     if (response.empty()) {
       sendVkMessage(bot, peer_id, "❌ Ошибка загрузки файла на сервер VK.");
       return;
@@ -119,8 +117,7 @@ static void sendVkPhoto(vk::base::bot::BotBase &bot, int64_t peer_id,
       return;
     }
 
-    // Проверяем наличие обязательных полей
-    if (!json_response.contains("photo") || !json_response.contains("server") ||
+        if (!json_response.contains("photo") || !json_response.contains("server") ||
         !json_response.contains("hash")) {
       std::cerr << "Missing fields in upload response: " << json_response.dump()
                 << std::endl;
@@ -128,28 +125,23 @@ static void sendVkPhoto(vk::base::bot::BotBase &bot, int64_t peer_id,
       return;
     }
 
-    // 3. Сохраняем фото (ВСЕ поля как строки для JSON)
-    vk::base::JsonType save_params;
+        vk::base::JsonType save_params;
 
-    // photo - всегда строка
-    auto &photo_val = json_response["photo"];
+        auto &photo_val = json_response["photo"];
     if (photo_val.is_string()) {
       save_params["photo"] = photo_val.get<std::string>();
     } else {
       save_params["photo"] = std::to_string(photo_val.get<int64_t>());
     }
 
-    // server - всегда строка (VK API принимает и число, и строку, но строка
-    // безопаснее)
-    auto &server_val = json_response["server"];
+            auto &server_val = json_response["server"];
     if (server_val.is_number()) {
       save_params["server"] = std::to_string(server_val.get<int>());
     } else {
       save_params["server"] = server_val.get<std::string>();
     }
 
-    // hash - строка
-    save_params["hash"] = json_response["hash"].get<std::string>();
+        save_params["hash"] = json_response["hash"].get<std::string>();
 
     auto saved = bot.SendRequest("photos.saveMessagesPhoto", save_params);
     if (saved.contains("error")) {
@@ -183,8 +175,7 @@ static void sendVkPhoto(vk::base::bot::BotBase &bot, int64_t peer_id,
       return;
     }
 
-    // Безопасное преобразование owner_id и id
-    int64_t owner_id = 0;
+        int64_t owner_id = 0;
     if (photo_info["owner_id"].is_number())
       owner_id = photo_info["owner_id"].get<int64_t>();
     else
@@ -218,8 +209,7 @@ static void sendVkDocument(vk::base::bot::BotBase &bot, int64_t peer_id,
                            const std::string &file_path,
                            const std::string &type_hint = "") {
   try {
-    // 1. Получаем upload_url
-    vk::base::JsonType params;
+        vk::base::JsonType params;
     params["peer_id"] = std::to_string(peer_id);
     params["type"] = "doc";
     auto upload_server =
@@ -241,8 +231,7 @@ static void sendVkDocument(vk::base::bot::BotBase &bot, int64_t peer_id,
     std::string upload_url =
         upload_server["response"]["upload_url"].get<std::string>();
 
-    // 2. Загружаем файл
-    std::string response = uploadFileToVk(upload_url, file_path, "file");
+        std::string response = uploadFileToVk(upload_url, file_path, "file");
     if (response.empty()) {
       sendVkMessage(bot, peer_id, "❌ Ошибка загрузки файла на сервер VK.");
       return;
@@ -265,8 +254,7 @@ static void sendVkDocument(vk::base::bot::BotBase &bot, int64_t peer_id,
       return;
     }
 
-    // 3. Сохраняем документ (безопасное извлечение)
-    vk::base::JsonType save_params;
+        vk::base::JsonType save_params;
     auto &file_val = json_response["file"];
     if (file_val.is_string()) {
       save_params["file"] = file_val.get<std::string>();
@@ -283,8 +271,7 @@ static void sendVkDocument(vk::base::bot::BotBase &bot, int64_t peer_id,
       return;
     }
 
-    // Новый правильный парсинг
-    if (!saved.contains("response") || !saved["response"].contains("doc")) {
+        if (!saved.contains("response") || !saved["response"].contains("doc")) {
       std::cerr << "Invalid save response: " << saved.dump() << std::endl;
       sendVkMessage(bot, peer_id, "❌ Ошибка: документ не сохранён.");
       return;
@@ -328,8 +315,7 @@ static void sendVkMessageWithKeyboard(vk::base::bot::BotBase &bot,
   params["peer_id"] = std::to_string(peer_id);
   params["message"] = message;
   params["random_id"] = std::to_string(generate_random_id());
-  // Сериализуем объект клавиатуры в строку
-  params["keyboard"] = keyboard.dump();
+    params["keyboard"] = keyboard.dump();
   auto response =
       bot.SendRequest(vk::base::bot::BotBase::METHODS::SEND_MESSAGE, params);
   if (response.contains("error"))
@@ -339,11 +325,9 @@ static void sendVkMessageWithKeyboard(vk::base::bot::BotBase &bot,
 
 static vk::base::JsonType createMainMenuKeyboard() {
   vk::base::JsonType keyboard;
-  keyboard["one_time"] = false; // Клавиатура не скроется после нажатия
-  keyboard["buttons"] = vk::base::JsonType::array(
+  keyboard["one_time"] = false;   keyboard["buttons"] = vk::base::JsonType::array(
       {vk::base::JsonType::array(
-           {// Первый ряд кнопок
-            vk::base::JsonType{
+           {            vk::base::JsonType{
                 {"action",
                  vk::base::JsonType{{"type", "text"},
                                     {"payload", "{\"command\":\"/photo\"}"},
@@ -356,8 +340,7 @@ static vk::base::JsonType createMainMenuKeyboard() {
                                     {"label", "🎥 Последнее видео"}}},
                 {"color", "secondary"}}}),
        vk::base::JsonType::array(
-           {// Второй ряд кнопок
-            vk::base::JsonType{
+           {            vk::base::JsonType{
                 {"action",
                  vk::base::JsonType{{"type", "text"},
                                     {"payload", "{\"command\":\"/status\"}"},
@@ -374,11 +357,9 @@ static vk::base::JsonType createMainMenuKeyboard() {
 
 void vk_bot_thread(Utility::Settings &settings,
                    ObserverLoop::VideoRecorder &recorder) {
-  // Карта команд
-  std::unordered_map<std::string, CommandHandler> commands;
+    std::unordered_map<std::string, CommandHandler> commands;
 
-  // /start
-  commands["start"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
+    commands["start"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
                           const std::string &) {
     int64_t uid = peer_id;
     if (authorizedUserId.load() == 0) {
@@ -405,8 +386,7 @@ void vk_bot_thread(Utility::Settings &settings,
     }
   };
 
-  // /photo
-  commands["photo"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
+    commands["photo"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
                           const std::string &) {
     cv::Mat frame_copy;
     {
@@ -431,8 +411,7 @@ void vk_bot_thread(Utility::Settings &settings,
     std::filesystem::remove(tmp);
   };
 
-  // /alert
-  commands["alert"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
+    commands["alert"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
                           const std::string &args) {
     if (args == "on") {
       alert_enabled = true;
@@ -455,8 +434,7 @@ void vk_bot_thread(Utility::Settings &settings,
     }
   };
 
-  // /last
-  commands["last"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
+    commands["last"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
                          const std::string &) {
     if (!flag_recording.load()) {
       sendVkMessage(bot, peer_id,
@@ -510,8 +488,7 @@ void vk_bot_thread(Utility::Settings &settings,
     }
   };
 
-  // /unstopable
-  commands["unstopable"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
+    commands["unstopable"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
                                const std::string &args) {
     if (args == "on") {
       unstopable_mode = true;
@@ -535,8 +512,7 @@ void vk_bot_thread(Utility::Settings &settings,
     }
   };
 
-  // /status
-  commands["status"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
+    commands["status"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
                            const std::string &) {
     std::string status = "📊 Статус системы:\n";
     status +=
@@ -577,8 +553,7 @@ void vk_bot_thread(Utility::Settings &settings,
     sendVkMessage(bot, peer_id, status);
   };
 
-  // /cpuinfo
-  commands["cpuinfo"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
+    commands["cpuinfo"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
                             const std::string &) {
     auto info = readFile("/proc/cpuinfo");
     if (info.empty()) {
@@ -595,8 +570,7 @@ void vk_bot_thread(Utility::Settings &settings,
     }
   };
 
-  // /temp
-  commands["temp"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
+    commands["temp"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
                          const std::string &) {
     std::ostringstream report;
     bool found = false;
@@ -674,8 +648,7 @@ void vk_bot_thread(Utility::Settings &settings,
       sendVkMessage(bot, peer_id, report.str());
   };
 
-  // /logs
-  commands["logs"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
+    commands["logs"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
                          const std::string &) {
     auto logPath = getLogFilePath();
     if (!std::filesystem::exists(logPath)) {
@@ -685,8 +658,7 @@ void vk_bot_thread(Utility::Settings &settings,
     }
   };
 
-  // Алиас для /alert
-  commands["notify"] = commands["alert"];
+    commands["notify"] = commands["alert"];
 
   // ---------- Основной цикл обработки событий ----------
   while (running) {
@@ -702,9 +674,7 @@ void vk_bot_thread(Utility::Settings &settings,
       while (running) {
         vk::base::bot::BotBase::Event event(
             vk::base::bot::BotBase::EVENTS::UNKNOWN,
-            vk::base::JsonType() // пустой JSON (работает, если JsonType имеет
-                                 // default ctor)
-        );
+            vk::base::JsonType()                                          );
 
         try {
           event = bot_vk.WaitForEvent();
@@ -760,20 +730,17 @@ void vk_bot_thread(Utility::Settings &settings,
           }
 
           std::string command_to_execute;
-          std::string command_args; // Аргументы могут быть пустыми для кнопок
-          // std::cout << "msg data: " << message_data.dump() << "\n";
+          std::string command_args;           // std::cout << "msg data: " << message_data.dump() << "\n";
           if (message_data.contains("payload") &&
               !message_data["payload"].is_null()) {
             try {
               vk::base::JsonType payload;
 
               if (message_data["payload"].is_string()) {
-                // Если пришла строка, парсим её
-                payload = vk::base::JsonType::parse(
+                                payload = vk::base::JsonType::parse(
                     message_data["payload"].get<std::string>());
               } else {
-                // Если уже объект, используем как есть
-                payload = message_data["payload"];
+                                payload = message_data["payload"];
               }
 
               if (payload.contains("command") &&
@@ -787,9 +754,7 @@ void vk_bot_thread(Utility::Settings &settings,
                         << std::endl;
             }
           }
-          // --- 2. Если payload не было, пробуем распарсить текстовую команду
-          // ---
-          else if (!text.empty() && text[0] == '/') {
+                              else if (!text.empty() && text[0] == '/') {
             std::istringstream iss(text);
             iss >> command_to_execute;
             std::getline(iss >> std::ws, command_args);
@@ -798,12 +763,10 @@ void vk_bot_thread(Utility::Settings &settings,
             }
           }
 
-          // --- 3. Если команда получена (любым способом), выполняем её ---
-          if (!command_to_execute.empty()) {
+                    if (!command_to_execute.empty()) {
             auto it = commands.find(command_to_execute);
             if (it != commands.end()) {
-              // Проверка авторизации (кроме /start)
-              if (peer_id != authorizedUserId.load() &&
+                            if (peer_id != authorizedUserId.load() &&
                   command_to_execute != "/start") {
                 sendVkMessage(bot_vk, peer_id, "⛔ У вас нет доступа.");
               } else {
@@ -813,8 +776,7 @@ void vk_bot_thread(Utility::Settings &settings,
               sendVkMessage(bot_vk, peer_id, "❓ Неизвестная команда");
             }
           }
-          // --- 4. Если это просто текст, отвечаем приветствием ---
-          else {
+                    else {
             sendVkMessage(bot_vk, peer_id,
                           "Вы написали: " + text + "\nЯ вас приветствую!");
           }
