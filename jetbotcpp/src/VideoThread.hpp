@@ -159,18 +159,18 @@ void video_processing_thread(TgBot::Bot *bot,
       Utility::Effects::playDetectSound();
     }
 
-    cv::rectangle(processed, cv::Point(WIDTH - 180, 10),
-                  cv::Point(WIDTH - 10, 70), cv::Scalar(0, 0, 0, 200), -1);
-    double fps =
-        1.0 / (std::chrono::duration<double>(loop_start - start_time).count() +
-               0.001);
+    // cv::rectangle(processed, cv::Point(WIDTH - 180, 10),
+    //               cv::Point(WIDTH - 10, 70), cv::Scalar(0, 0, 0, 200), -1);
+    // double fps =
+    //     1.0 / (std::chrono::duration<double>(loop_start - start_time).count() +
+    //            0.001);
     // cv::putText(processed, "TARGETS: " +
     // std::to_string(tracked_objects.size()),
     //             cv::Point(WIDTH - 170, 30), cv::FONT_HERSHEY_SIMPLEX, 0.6,
     //             cv::Scalar(0, 0, 255), 1);
-    cv::putText(processed, "FPS: " + std::to_string(static_cast<int>(fps)),
-                cv::Point(WIDTH - 170, 55), cv::FONT_HERSHEY_SIMPLEX, 0.5,
-                cv::Scalar(0, 200, 255), 1);
+    // cv::putText(processed, "FPS: " + std::to_string(static_cast<int>(fps)),
+    //             cv::Point(WIDTH - 170, 55), cv::FONT_HERSHEY_SIMPLEX, 0.5,
+    //             cv::Scalar(0, 200, 255), 1);
 
     {
       std::lock_guard<std::mutex> lock(frame_mutex);

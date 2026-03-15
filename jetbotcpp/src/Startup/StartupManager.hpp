@@ -175,6 +175,43 @@ public:
     return anim_frame;
   }
 
+bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps, int width, int height, cv::Mat& frame) {
+    const int MAX_CAMERAS = 10;
+    std::vector<int> indices;
+    
+    indices.push_back(preferred_index);
+    for (int i = 0; i < MAX_CAMERAS; ++i) {
+        if (i != preferred_index) {
+            indices.push_back(i);
+        }
+    }
+
+    for (int idx : indices) {
+        std::cout << "Попытка открыть камеру с индексом: " << idx << std::endl;
+        cap.open(idx, cv::CAP_V4L);
+        if (cap.isOpened()) {
+            cap.set(cv::CAP_PROP_FRAME_WIDTH, width);
+            cap.set(cv::CAP_PROP_FRAME_HEIGHT, height);
+            cap.set(cv::CAP_PROP_FPS, fps);
+            
+            cv::Mat test_frame;
+            if (cap.read(test_frame)) {
+                cv::resize(test_frame, frame, cv::Size(width, height));
+                std::cout << "Камера успешно открыта с индексом: " << idx << std::endl;
+                return true;
+            } else {
+                std::cerr << "Камера с индексом " << idx << " открыта, но не удалось получить кадр." << std::endl;
+                cap.release();
+            }
+        } else {
+            std::cerr << "Не удалось открыть камеру с индексом: " << idx << std::endl;
+        }
+    }
+    
+    std::cerr << "Не удалось открыть ни одну камеру." << std::endl;
+    return false;
+}
+
   void initialize(const std::string& resource_dir, const int camera_index, const int fps) {
     // Шаг 1: Загрузка классов
     loading_text_ = "LOADING CLASSES";
@@ -267,17 +304,9 @@ public:
 
     // Шаг 4: Открытие камеры
     loading_text_ = "CONNECTING CAMERA";
-    cap_.open(camera_index, cv::CAP_V4L);
-    if (cap_.isOpened()) {
-      cap_.set(cv::CAP_PROP_FRAME_WIDTH, 640);
-      cap_.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
-      cap_.set(cv::CAP_PROP_FPS, fps);
-
-      // Получаем первый кадр
-      cv::Mat frame;
-      if (cap_.read(frame)) {
-        cv::resize(frame, frame_, cv::Size(width_, height_));
-      }
+    if (openCameraWithFallback(cap_, camera_index, fps, width_, height_, frame_)) {
+    } else {
+        std::cerr << "Камера не открыта. Программа продолжит работу без видеопотока." << std::endl;
     }
 
     initialization_progress_ = 1.0f;
