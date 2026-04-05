@@ -678,7 +678,8 @@ void vk_bot_thread(Utility::Settings& settings,
         }
 
         if (event.parameters.is_null()) {
-          std::cerr << "Null event parameters, skipping..." << std::endl;
+          std::cerr << "vkapi: skipping for 200ms..." << std::endl;
+          std::this_thread::sleep_for(std::chrono::milliseconds(200));
           continue;
         }
 
