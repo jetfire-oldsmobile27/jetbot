@@ -1,17 +1,20 @@
+// Мое API к VK API
 #include "OutAPI/VkBot.hpp"
-#include "Globals.hpp"
-#include "Logging.hpp"
-#include "ObserverLoop/VideoRecorder.hpp"
-#include "Utility/Settings.hpp"
+
+#include <curl/curl.h>
 
 #include <BotBase.hpp>
-#include <curl/curl.h>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <random>
 #include <sstream>
+
+#include "Globals.hpp"
+#include "Logging.hpp"
+#include "ObserverLoop/VideoRecorder.hpp"
+#include "Utility/Settings.hpp"
 
 // ---------- Вспомогательные функции ----------
 static int64_t generate_random_id() {
@@ -24,49 +27,37 @@ static int64_t generate_random_id() {
 static std::string uploadFileToVk(const std::string &url,
                                   const std::string &filePath,
                                   const std::string &fieldName) {
-  CURL *curl = curl_easy_init();
-  if (!curl)
-    return "";
+    CURL *curl = curl_easy_init();
+    if (!curl) return "";
 
-  struct curl_httppost *formpost = NULL;
-  struct curl_httppost *lastptr = NULL;
-  curl_formadd(&formpost, &lastptr, CURLFORM_COPYNAME, fieldName.c_str(),
-               CURLFORM_FILE, filePath.c_str(), CURLFORM_END);
+    curl_mime *mime = curl_mime_init(curl);
+    curl_mimepart *part = curl_mime_addpart(mime);
+    curl_mime_name(part, fieldName.c_str());
+    curl_mime_filedata(part, filePath.c_str());
 
-  std::string response;
-  long http_code = 0;
+    std::string response;
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
+        +[](char *ptr, size_t size, size_t nmemb, std::string *data) -> size_t {
+            data->append(ptr, size * nmemb);
+            return size * nmemb;
+        });
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 
-  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-  curl_easy_setopt(curl, CURLOPT_HTTPPOST, formpost);
-  curl_easy_setopt(
-      curl, CURLOPT_WRITEFUNCTION,
-      +[](char *ptr, size_t size, size_t nmemb, std::string *data) {
-        data->append(ptr, size * nmemb);
-        return size * nmemb;
-      });
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    curl_mime_free(mime);  // освобождать ПОСЛЕ cleanup
 
-  CURLcode res = curl_easy_perform(curl);
-  if (res == CURLE_OK) {
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-  }
-  curl_easy_cleanup(curl);
-  curl_formfree(formpost);
-
-  if (res != CURLE_OK) {
-    std::cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res)
-              << std::endl;
-    return "";
-  }
-  if (http_code != 200) {
-    std::cerr << "HTTP error " << http_code << " response: " << response
-              << std::endl;
-    return "";
-  }
-  return response;
+    if (res != CURLE_OK) {
+        std::cerr << "curl error: " << curl_easy_strerror(res) << std::endl;
+        return "";
+    }
+    return response;
 }
-static void sendVkMessage(vk::base::bot::BotBase &bot, int64_t peer_id,
-                          const std::string &message) {
+
+static void sendVkMessage(vk::base::bot::BotBase& bot, int64_t peer_id,
+                          const std::string& message) {
   vk::base::JsonType params;
   params["peer_id"] = std::to_string(peer_id);
   params["message"] = message;
@@ -77,10 +68,10 @@ static void sendVkMessage(vk::base::bot::BotBase &bot, int64_t peer_id,
     std::cerr << "VK sendMessage error: " << response.dump() << std::endl;
 }
 
-static void sendVkPhoto(vk::base::bot::BotBase &bot, int64_t peer_id,
-                        const std::string &file_path) {
+static void sendVkPhoto(vk::base::bot::BotBase& bot, int64_t peer_id,
+                        const std::string& file_path) {
   try {
-        vk::base::JsonType params;
+    vk::base::JsonType params;
     params["peer_id"] = std::to_string(peer_id);
     auto upload_server =
         bot.SendRequest("photos.getMessagesUploadServer", params);
@@ -101,7 +92,7 @@ static void sendVkPhoto(vk::base::bot::BotBase &bot, int64_t peer_id,
     std::string upload_url =
         upload_server["response"]["upload_url"].get<std::string>();
 
-        std::string response = uploadFileToVk(upload_url, file_path, "photo");
+    std::string response = uploadFileToVk(upload_url, file_path, "photo");
     if (response.empty()) {
       sendVkMessage(bot, peer_id, "❌ Ошибка загрузки файла на сервер VK.");
       return;
@@ -110,14 +101,14 @@ static void sendVkPhoto(vk::base::bot::BotBase &bot, int64_t peer_id,
     vk::base::JsonType json_response;
     try {
       json_response = vk::base::JsonType::parse(response);
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       std::cerr << "Failed to parse upload response: " << response
                 << " error: " << e.what() << std::endl;
       sendVkMessage(bot, peer_id, "❌ Ошибка парсинга ответа от сервера.");
       return;
     }
 
-        if (!json_response.contains("photo") || !json_response.contains("server") ||
+    if (!json_response.contains("photo") || !json_response.contains("server") ||
         !json_response.contains("hash")) {
       std::cerr << "Missing fields in upload response: " << json_response.dump()
                 << std::endl;
@@ -125,23 +116,23 @@ static void sendVkPhoto(vk::base::bot::BotBase &bot, int64_t peer_id,
       return;
     }
 
-        vk::base::JsonType save_params;
+    vk::base::JsonType save_params;
 
-        auto &photo_val = json_response["photo"];
+    auto& photo_val = json_response["photo"];
     if (photo_val.is_string()) {
       save_params["photo"] = photo_val.get<std::string>();
     } else {
       save_params["photo"] = std::to_string(photo_val.get<int64_t>());
     }
 
-            auto &server_val = json_response["server"];
+    auto& server_val = json_response["server"];
     if (server_val.is_number()) {
       save_params["server"] = std::to_string(server_val.get<int>());
     } else {
       save_params["server"] = server_val.get<std::string>();
     }
 
-        save_params["hash"] = json_response["hash"].get<std::string>();
+    save_params["hash"] = json_response["hash"].get<std::string>();
 
     auto saved = bot.SendRequest("photos.saveMessagesPhoto", save_params);
     if (saved.contains("error")) {
@@ -175,7 +166,7 @@ static void sendVkPhoto(vk::base::bot::BotBase &bot, int64_t peer_id,
       return;
     }
 
-        int64_t owner_id = 0;
+    int64_t owner_id = 0;
     if (photo_info["owner_id"].is_number())
       owner_id = photo_info["owner_id"].get<int64_t>();
     else
@@ -200,16 +191,16 @@ static void sendVkPhoto(vk::base::bot::BotBase &bot, int64_t peer_id,
                 << std::endl;
       sendVkMessage(bot, peer_id, "❌ Ошибка отправки сообщения с фото.");
     }
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     std::cerr << "Exception in sendVkPhoto: " << e.what() << std::endl;
     sendVkMessage(bot, peer_id, "❌ Внутренняя ошибка при отправке фото.");
   }
 }
-static void sendVkDocument(vk::base::bot::BotBase &bot, int64_t peer_id,
-                           const std::string &file_path,
-                           const std::string &type_hint = "") {
+static void sendVkDocument(vk::base::bot::BotBase& bot, int64_t peer_id,
+                           const std::string& file_path,
+                           const std::string& type_hint = "") {
   try {
-        vk::base::JsonType params;
+    vk::base::JsonType params;
     params["peer_id"] = std::to_string(peer_id);
     params["type"] = "doc";
     auto upload_server =
@@ -231,7 +222,7 @@ static void sendVkDocument(vk::base::bot::BotBase &bot, int64_t peer_id,
     std::string upload_url =
         upload_server["response"]["upload_url"].get<std::string>();
 
-        std::string response = uploadFileToVk(upload_url, file_path, "file");
+    std::string response = uploadFileToVk(upload_url, file_path, "file");
     if (response.empty()) {
       sendVkMessage(bot, peer_id, "❌ Ошибка загрузки файла на сервер VK.");
       return;
@@ -240,7 +231,7 @@ static void sendVkDocument(vk::base::bot::BotBase &bot, int64_t peer_id,
     vk::base::JsonType json_response;
     try {
       json_response = vk::base::JsonType::parse(response);
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
       std::cerr << "Failed to parse upload response: " << response
                 << " error: " << e.what() << std::endl;
       sendVkMessage(bot, peer_id, "❌ Ошибка парсинга ответа от сервера.");
@@ -254,8 +245,8 @@ static void sendVkDocument(vk::base::bot::BotBase &bot, int64_t peer_id,
       return;
     }
 
-        vk::base::JsonType save_params;
-    auto &file_val = json_response["file"];
+    vk::base::JsonType save_params;
+    auto& file_val = json_response["file"];
     if (file_val.is_string()) {
       save_params["file"] = file_val.get<std::string>();
     } else if (file_val.is_number()) {
@@ -271,7 +262,7 @@ static void sendVkDocument(vk::base::bot::BotBase &bot, int64_t peer_id,
       return;
     }
 
-        if (!saved.contains("response") || !saved["response"].contains("doc")) {
+    if (!saved.contains("response") || !saved["response"].contains("doc")) {
       std::cerr << "Invalid save response: " << saved.dump() << std::endl;
       sendVkMessage(bot, peer_id, "❌ Ошибка: документ не сохранён.");
       return;
@@ -301,21 +292,21 @@ static void sendVkDocument(vk::base::bot::BotBase &bot, int64_t peer_id,
                 << std::endl;
       sendVkMessage(bot, peer_id, "❌ Ошибка отправки сообщения с документом.");
     }
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     std::cerr << "Exception in sendVkPhoto: " << e.what() << std::endl;
     sendVkMessage(bot, peer_id, "❌ Внутренняя ошибка при отправке фото.");
   }
 }
 
-static void sendVkMessageWithKeyboard(vk::base::bot::BotBase &bot,
+static void sendVkMessageWithKeyboard(vk::base::bot::BotBase& bot,
                                       int64_t peer_id,
-                                      const std::string &message,
-                                      const vk::base::JsonType &keyboard) {
+                                      const std::string& message,
+                                      const vk::base::JsonType& keyboard) {
   vk::base::JsonType params;
   params["peer_id"] = std::to_string(peer_id);
   params["message"] = message;
   params["random_id"] = std::to_string(generate_random_id());
-    params["keyboard"] = keyboard.dump();
+  params["keyboard"] = keyboard.dump();
   auto response =
       bot.SendRequest(vk::base::bot::BotBase::METHODS::SEND_MESSAGE, params);
   if (response.contains("error"))
@@ -325,9 +316,10 @@ static void sendVkMessageWithKeyboard(vk::base::bot::BotBase &bot,
 
 static vk::base::JsonType createMainMenuKeyboard() {
   vk::base::JsonType keyboard;
-  keyboard["one_time"] = false;   keyboard["buttons"] = vk::base::JsonType::array(
+  keyboard["one_time"] = false;
+  keyboard["buttons"] = vk::base::JsonType::array(
       {vk::base::JsonType::array(
-           {            vk::base::JsonType{
+           {vk::base::JsonType{
                 {"action",
                  vk::base::JsonType{{"type", "text"},
                                     {"payload", "{\"command\":\"/photo\"}"},
@@ -340,7 +332,7 @@ static vk::base::JsonType createMainMenuKeyboard() {
                                     {"label", "🎥 Последнее видео"}}},
                 {"color", "secondary"}}}),
        vk::base::JsonType::array(
-           {            vk::base::JsonType{
+           {vk::base::JsonType{
                 {"action",
                  vk::base::JsonType{{"type", "text"},
                                     {"payload", "{\"command\":\"/status\"}"},
@@ -355,12 +347,12 @@ static vk::base::JsonType createMainMenuKeyboard() {
   return keyboard;
 }
 
-void vk_bot_thread(Utility::Settings &settings,
-                   ObserverLoop::VideoRecorder &recorder) {
-    std::unordered_map<std::string, CommandHandler> commands;
+void vk_bot_thread(Utility::Settings& settings,
+                   ObserverLoop::VideoRecorder& recorder) {
+  std::unordered_map<std::string, CommandHandler> commands;
 
-    commands["start"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
-                          const std::string &) {
+  commands["start"] = [&](vk::base::bot::BotBase& bot, int64_t peer_id,
+                          const std::string&) {
     int64_t uid = peer_id;
     if (authorizedUserId.load() == 0) {
       authorizedUserId = uid;
@@ -386,8 +378,8 @@ void vk_bot_thread(Utility::Settings &settings,
     }
   };
 
-    commands["photo"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
-                          const std::string &) {
+  commands["photo"] = [&](vk::base::bot::BotBase& bot, int64_t peer_id,
+                          const std::string&) {
     cv::Mat frame_copy;
     {
       std::lock_guard<std::mutex> lock(frame_mutex);
@@ -411,8 +403,8 @@ void vk_bot_thread(Utility::Settings &settings,
     std::filesystem::remove(tmp);
   };
 
-    commands["alert"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
-                          const std::string &args) {
+  commands["alert"] = [&](vk::base::bot::BotBase& bot, int64_t peer_id,
+                          const std::string& args) {
     if (args == "on") {
       alert_enabled = true;
       {
@@ -434,8 +426,8 @@ void vk_bot_thread(Utility::Settings &settings,
     }
   };
 
-    commands["last"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
-                         const std::string &) {
+  commands["last"] = [&](vk::base::bot::BotBase& bot, int64_t peer_id,
+                         const std::string&) {
     if (!flag_recording.load()) {
       sendVkMessage(bot, peer_id,
                     "⚠️ Запись видео отключена (флаг --no-recording).");
@@ -480,7 +472,7 @@ void vk_bot_thread(Utility::Settings &settings,
           recorder.startRecording();
         }
         sendVkDocument(bot, peer_id, video_path, "video/mp4");
-      } catch (const std::exception &e) {
+      } catch (const std::exception& e) {
         std::cerr << "Ошибка отправки видео VK: " << e.what() << std::endl;
         sendVkMessage(bot, peer_id,
                       "❌ Ошибка отправки видео: " + std::string(e.what()));
@@ -488,8 +480,8 @@ void vk_bot_thread(Utility::Settings &settings,
     }
   };
 
-    commands["unstopable"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
-                               const std::string &args) {
+  commands["unstopable"] = [&](vk::base::bot::BotBase& bot, int64_t peer_id,
+                               const std::string& args) {
     if (args == "on") {
       unstopable_mode = true;
       {
@@ -512,8 +504,8 @@ void vk_bot_thread(Utility::Settings &settings,
     }
   };
 
-    commands["status"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
-                           const std::string &) {
+  commands["status"] = [&](vk::base::bot::BotBase& bot, int64_t peer_id,
+                           const std::string&) {
     std::string status = "📊 Статус системы:\n";
     status +=
         "Запись: " +
@@ -553,8 +545,8 @@ void vk_bot_thread(Utility::Settings &settings,
     sendVkMessage(bot, peer_id, status);
   };
 
-    commands["cpuinfo"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
-                            const std::string &) {
+  commands["cpuinfo"] = [&](vk::base::bot::BotBase& bot, int64_t peer_id,
+                            const std::string&) {
     auto info = readFile("/proc/cpuinfo");
     if (info.empty()) {
       sendVkMessage(bot, peer_id, "❌ Не удалось прочитать /proc/cpuinfo");
@@ -570,17 +562,16 @@ void vk_bot_thread(Utility::Settings &settings,
     }
   };
 
-    commands["temp"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
-                         const std::string &) {
+  commands["temp"] = [&](vk::base::bot::BotBase& bot, int64_t peer_id,
+                         const std::string&) {
     std::ostringstream report;
     bool found = false;
     const std::filesystem::path thermalDir{"/sys/class/thermal"};
     if (std::filesystem::exists(thermalDir) &&
         std::filesystem::is_directory(thermalDir)) {
-      for (auto &entry : std::filesystem::directory_iterator(thermalDir)) {
+      for (auto& entry : std::filesystem::directory_iterator(thermalDir)) {
         auto name = entry.path().filename().string();
-        if (name.rfind("thermal_zone", 0) != 0)
-          continue;
+        if (name.rfind("thermal_zone", 0) != 0) continue;
         std::filesystem::path typeFile = entry.path() / "type";
         std::filesystem::path tempFile = entry.path() / "temp";
         if (!std::filesystem::exists(typeFile) ||
@@ -604,7 +595,7 @@ void vk_bot_thread(Utility::Settings &settings,
     const std::filesystem::path hwmonDir{"/sys/class/hwmon"};
     if (std::filesystem::exists(hwmonDir) &&
         std::filesystem::is_directory(hwmonDir)) {
-      for (auto &entry : std::filesystem::directory_iterator(hwmonDir)) {
+      for (auto& entry : std::filesystem::directory_iterator(hwmonDir)) {
         std::string chip;
         std::filesystem::path nameFile = entry.path() / "name";
         if (std::filesystem::exists(nameFile)) {
@@ -612,7 +603,7 @@ void vk_bot_thread(Utility::Settings &settings,
         } else {
           chip = entry.path().filename().string();
         }
-        for (auto &f : std::filesystem::directory_iterator(entry.path())) {
+        for (auto& f : std::filesystem::directory_iterator(entry.path())) {
           auto fname = f.path().filename().string();
           if (fname.rfind("temp", 0) != 0 ||
               fname.find("_input") == std::string::npos)
@@ -648,8 +639,8 @@ void vk_bot_thread(Utility::Settings &settings,
       sendVkMessage(bot, peer_id, report.str());
   };
 
-    commands["logs"] = [&](vk::base::bot::BotBase &bot, int64_t peer_id,
-                         const std::string &) {
+  commands["logs"] = [&](vk::base::bot::BotBase& bot, int64_t peer_id,
+                         const std::string&) {
     auto logPath = getLogFilePath();
     if (!std::filesystem::exists(logPath)) {
       sendVkMessage(bot, peer_id, "📄 Лог за сегодня не найден");
@@ -658,7 +649,7 @@ void vk_bot_thread(Utility::Settings &settings,
     }
   };
 
-    commands["notify"] = commands["alert"];
+  commands["notify"] = commands["alert"];
 
   // ---------- Основной цикл обработки событий ----------
   while (running) {
@@ -673,12 +664,11 @@ void vk_bot_thread(Utility::Settings &settings,
 
       while (running) {
         vk::base::bot::BotBase::Event event(
-            vk::base::bot::BotBase::EVENTS::UNKNOWN,
-            vk::base::JsonType()                                          );
+            vk::base::bot::BotBase::EVENTS::UNKNOWN, vk::base::JsonType());
 
         try {
           event = bot_vk.WaitForEvent();
-        } catch (const nlohmann::json::type_error &e) {
+        } catch (const nlohmann::json::type_error& e) {
           if (std::string(e.what()).find("cannot use at() with null") !=
               std::string::npos) {
             std::cerr << "VK: empty updates packet, continuing..." << std::endl;
@@ -693,125 +683,125 @@ void vk_bot_thread(Utility::Settings &settings,
         }
 
         switch (event.type) {
-        case vk::base::bot::BotBase::EVENTS::MESSAGE_NEW: {
-          std::cout << "Новое сообщение VK!" << std::endl;
+          case vk::base::bot::BotBase::EVENTS::MESSAGE_NEW: {
+            std::cout << "Новое сообщение VK!" << std::endl;
 
-          if (!event.parameters.contains("object") ||
-              event.parameters["object"].is_null())
-            break;
-          auto object = event.parameters["object"];
-          if (!object.contains("message") || object["message"].is_null())
-            break;
-          auto message_data = object["message"];
-          if (!message_data.contains("peer_id")) {
-            std::cerr << "peer_id not found, skipping" << std::endl;
-            break;
-          }
-          int64_t peer_id = 0;
-          if (message_data.contains("peer_id") &&
-              message_data["peer_id"].is_number_integer())
-            peer_id = message_data["peer_id"].get<int64_t>();
-          else {
-            std::cerr << "peer_id not found or not integer, skipping"
-                      << std::endl;
-            break;
-          }
-
-          std::string text;
-          if (message_data.contains("text") &&
-              !message_data["text"].is_null()) {
-            auto &text_val = message_data["text"];
-            if (text_val.is_string())
-              text = text_val.get<std::string>();
-            else
-              text = text_val.dump();
-          } else {
-            text = "⚠️ [нет текста]";
-          }
-
-          std::string command_to_execute;
-          std::string command_args;           // std::cout << "msg data: " << message_data.dump() << "\n";
-          if (message_data.contains("payload") &&
-              !message_data["payload"].is_null()) {
-            try {
-              vk::base::JsonType payload;
-
-              if (message_data["payload"].is_string()) {
-                                payload = vk::base::JsonType::parse(
-                    message_data["payload"].get<std::string>());
-              } else {
-                                payload = message_data["payload"];
-              }
-
-              if (payload.contains("command") &&
-                  payload["command"].is_string()) {
-                command_to_execute = payload["command"].get<std::string>();
-                // std::cout << "Получена команда из payload: "
-                //           << command_to_execute << std::endl;
-              }
-            } catch (const std::exception &e) {
-              std::cerr << "Ошибка обработки payload: " << e.what()
+            if (!event.parameters.contains("object") ||
+                event.parameters["object"].is_null())
+              break;
+            auto object = event.parameters["object"];
+            if (!object.contains("message") || object["message"].is_null())
+              break;
+            auto message_data = object["message"];
+            if (!message_data.contains("peer_id")) {
+              std::cerr << "peer_id not found, skipping" << std::endl;
+              break;
+            }
+            int64_t peer_id = 0;
+            if (message_data.contains("peer_id") &&
+                message_data["peer_id"].is_number_integer())
+              peer_id = message_data["peer_id"].get<int64_t>();
+            else {
+              std::cerr << "peer_id not found or not integer, skipping"
                         << std::endl;
+              break;
             }
-          }
-                              else if (!text.empty() && text[0] == '/') {
-            std::istringstream iss(text);
-            iss >> command_to_execute;
-            std::getline(iss >> std::ws, command_args);
-            if (!command_to_execute.empty() && command_to_execute[0] == '/') {
-              command_to_execute = command_to_execute.substr(1);
-            }
-          }
 
-                    if (!command_to_execute.empty()) {
-            auto it = commands.find(command_to_execute);
-            if (it != commands.end()) {
-                            if (peer_id != authorizedUserId.load() &&
-                  command_to_execute != "/start") {
-                sendVkMessage(bot_vk, peer_id, "⛔ У вас нет доступа.");
+            std::string text;
+            if (message_data.contains("text") &&
+                !message_data["text"].is_null()) {
+              auto& text_val = message_data["text"];
+              if (text_val.is_string())
+                text = text_val.get<std::string>();
+              else
+                text = text_val.dump();
+            } else {
+              text = "⚠️ [нет текста]";
+            }
+
+            std::string command_to_execute;
+            std::string command_args;  // std::cout << "msg data: " <<
+                                       // message_data.dump() << "\n";
+            if (message_data.contains("payload") &&
+                !message_data["payload"].is_null()) {
+              try {
+                vk::base::JsonType payload;
+
+                if (message_data["payload"].is_string()) {
+                  payload = vk::base::JsonType::parse(
+                      message_data["payload"].get<std::string>());
+                } else {
+                  payload = message_data["payload"];
+                }
+
+                if (payload.contains("command") &&
+                    payload["command"].is_string()) {
+                  command_to_execute = payload["command"].get<std::string>();
+                  // std::cout << "Получена команда из payload: "
+                  //           << command_to_execute << std::endl;
+                }
+              } catch (const std::exception& e) {
+                std::cerr << "Ошибка обработки payload: " << e.what()
+                          << std::endl;
+              }
+            } else if (!text.empty() && text[0] == '/') {
+              std::istringstream iss(text);
+              iss >> command_to_execute;
+              std::getline(iss >> std::ws, command_args);
+              if (!command_to_execute.empty() && command_to_execute[0] == '/') {
+                command_to_execute = command_to_execute.substr(1);
+              }
+            }
+
+            if (!command_to_execute.empty()) {
+              auto it = commands.find(command_to_execute);
+              if (it != commands.end()) {
+                if (peer_id != authorizedUserId.load() &&
+                    command_to_execute != "start") {
+                  sendVkMessage(bot_vk, peer_id, "⛔ У вас нет доступа.");
+                } else {
+                  it->second(bot_vk, peer_id, command_args);
+                }
               } else {
-                it->second(bot_vk, peer_id, command_args);
+                sendVkMessage(bot_vk, peer_id, "❓ Неизвестная команда");
               }
             } else {
-              sendVkMessage(bot_vk, peer_id, "❓ Неизвестная команда");
+              sendVkMessage(bot_vk, peer_id,
+                            "Вы написали: " + text + "\nЯ вас приветствую!");
             }
-          }
-                    else {
-            sendVkMessage(bot_vk, peer_id,
-                          "Вы написали: " + text + "\nЯ вас приветствую!");
-          }
-          break;
-        }
-
-        case vk::base::bot::BotBase::EVENTS::GROUP_JOIN: {
-          std::cout << "Новый участник вступил!" << std::endl;
-          if (!event.parameters.contains("user_id") ||
-              !event.parameters["user_id"].is_number_integer()) {
-            std::cerr << "user_id not found or not integer" << std::endl;
             break;
           }
-          auto user_id = event.parameters["user_id"].get<int64_t>();
 
-          vk::base::JsonType params;
-          params["peer_id"] = std::to_string(user_id);
-          params["message"] =
-              "Привет, новый участник! Добро пожаловать в нашу группу!";
-          params["random_id"] = std::to_string(generate_random_id());
+          case vk::base::bot::BotBase::EVENTS::GROUP_JOIN: {
+            std::cout << "Новый участник вступил!" << std::endl;
+            if (!event.parameters.contains("user_id") ||
+                !event.parameters["user_id"].is_number_integer()) {
+              std::cerr << "user_id not found or not integer" << std::endl;
+              break;
+            }
+            auto user_id = event.parameters["user_id"].get<int64_t>();
 
-          auto response = bot_vk.SendRequest(
-              vk::base::bot::BotBase::METHODS::SEND_MESSAGE, params);
-          if (response.contains("error"))
-            std::cerr << "Ошибка отправки VK: " << response.dump() << std::endl;
-          break;
-        }
+            vk::base::JsonType params;
+            params["peer_id"] = std::to_string(user_id);
+            params["message"] =
+                "Привет, новый участник! Добро пожаловать в нашу группу!";
+            params["random_id"] = std::to_string(generate_random_id());
 
-        default:
-          break;
+            auto response = bot_vk.SendRequest(
+                vk::base::bot::BotBase::METHODS::SEND_MESSAGE, params);
+            if (response.contains("error"))
+              std::cerr << "Ошибка отправки VK: " << response.dump()
+                        << std::endl;
+            break;
+          }
+
+          default:
+            break;
         }
       }
     }
 
-    catch (const std::exception &e) {
+    catch (const std::exception& e) {
       std::cerr << "\nVK thread error: " << e.what()
                 << " — reconnecting in 3s..." << std::endl;
       std::this_thread::sleep_for(std::chrono::seconds(3));
