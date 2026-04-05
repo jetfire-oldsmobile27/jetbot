@@ -111,7 +111,7 @@ int main(int argc, char *argv[]) {
   // bool test_result = Tests::makeTests(CAMERA_INDEX);
   // std::cout << "Tests " << (test_result ? "passed" : "failed") << std::endl;
   // return test_result ? 0 : 1;
-
+  std::cout << "=== " << 'v' << appVersion << ' ' << buildTime << " ===" << std::endl;
   jetbot_dir = std::string(getenv("HOME")) + "/jetbot";
   video_dir = jetbot_dir + "/video";
   logs_dir = jetbot_dir + "/logs";

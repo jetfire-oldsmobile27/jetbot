@@ -2,6 +2,7 @@
 #include <atomic>
 #include <string>
 #include <opencv2/core.hpp>
+#include "Version.hpp"
 
 // Флаги конфигурации (доступны из командной строки)
 extern std::atomic<bool> flag_recording;

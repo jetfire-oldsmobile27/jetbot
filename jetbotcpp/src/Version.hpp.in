@@ -1,0 +1,7 @@
+#pragma once
+#include <string>
+
+
+// Информация о текущей версии
+const std::string appVersion = "@APP_VERSION@"
+const std::string buildTime = "@BUILD_TIME@"

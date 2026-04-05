@@ -5,6 +5,20 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+file(READ "version.txt" ver)
+string(REGEX MATCH "VERSION_MAJOR ([0-9]+)" _ ${ver})
+set(ver_major ${CMAKE_MATCH_1})
+string(REGEX MATCH "VERSION_MINOR ([0-9]+)" _ ${ver})
+set(ver_minor ${CMAKE_MATCH_1})
+string(REGEX MATCH "VERSION_PATCH ([0-9]+)" _ ${ver})
+set(ver_patch ${CMAKE_MATCH_1})
+set(APP_VERSION ${ver_major}.${ver_minor}.${ver_patch})
+string(TIMESTAMP BUILD_TIME "%Y-%m-%d %H:%M:%S" UTC)
+
+message("Version: ${APP_VERSION} Builded time UTC: ${BUILD_TIME}")
+configure_file(src/Version.hpp.in Version.hpp)
+
+
 file(GLOB_RECURSE PROJECT_SOURCES
     ${CMAKE_SOURCE_DIR}/src/Utility/*.cpp
     ${CMAKE_SOURCE_DIR}/src/Utility/Debug-server/*.cpp
@@ -36,7 +50,7 @@ add_executable(${PROJECT_NAME}
     ${PROJECT_SOURCES}
 )
 
-target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
 add_all_include_directories(${CMAKE_SOURCE_DIR}/src)
 
 if(ON_SBC)
