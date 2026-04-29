@@ -1,18 +1,22 @@
 [requires]
 opencv/4.12.0
-ffmpeg/7.1.1
+#ffmpeg/7.1.3
 tgbot/1.9.1
 boost/1.83.0
 indicators/2.3
 onnxruntime/1.18.1
 nlohmann_json/3.11.3
 vkapi/0.0.9@qucals/stable
+cpuinfo/cci.20231129
+
+[tool_requires]
+cmake/3.31.12
 
 [options]
 opencv/*:with_v4l=True
 opencv/*:with_ffmpeg=True
 xkbcommon/*:with_x11=False
-ffmpeg/7.1.1:with_pulse=False
+ffmpeg/*:with_pulse=False
 */*:shared=False
 
 [generators]
