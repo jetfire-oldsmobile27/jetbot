@@ -3,5 +3,5 @@
 
 
 // Информация о текущей версии
-const std::string appVersion = "@APP_VERSION@"
-const std::string buildTime = "@BUILD_TIME@"
+const std::string appVersion = "@APP_VERSION@";
+const std::string buildTime = "@BUILD_TIME@";
