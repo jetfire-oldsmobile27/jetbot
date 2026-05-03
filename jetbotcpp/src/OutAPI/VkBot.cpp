@@ -540,27 +540,29 @@ void vk_bot_thread(Utility::Settings& settings,
             std::cout << "VK bot started\n";
 
             while (running) {
-                // EventData вместо Event; wait_for_event() вместо WaitForEvent()
                 Bot::EventData event{};
-
+ 
                 try {
                     event = bot_vk.wait_for_event();
                 } catch (const nlohmann::json::type_error& e) {
-                    if (std::string(e.what()).find("cannot use at() with null") != std::string::npos) {
-                        std::cerr << "VK: empty updates packet, continuing...\n";
+                    if (std::string(e.what()).find("cannot use at() with null")
+                            != std::string::npos) {
+                        std::cerr << "VK: json type error, continuing...\n";
                         continue;
                     }
                     throw;
+                } catch (const vk::ex::NetworkException& e) {
+                    std::cerr << "VK network error: " << e.what() << ", retry in 2s\n";
+                    std::this_thread::sleep_for(std::chrono::seconds(2));
+                    continue;
                 }
-
-                // payload вместо parameters
-                if (event.payload.is_null()) {
-                    std::cerr << "vkapi: skipping for 200ms...\n";
-                    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+ 
+                
+                if (event.type == Bot::Event::Unknown) {
+                    //std::this_thread::sleep_for(std::chrono::milliseconds(200));
                     continue;
                 }
 
-                // Event::MessageNew вместо EVENTS::MESSAGE_NEW
                 switch (event.type) {
                     case Bot::Event::MessageNew: {
                         std::cout << "Новое сообщение VK!\n";

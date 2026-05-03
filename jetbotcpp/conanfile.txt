@@ -7,6 +7,7 @@ indicators/2.3
 onnxruntime/1.18.1
 nlohmann_json/3.11.3
 vkbot/0.1.0@jetfire27/stable
+openssl/3.6.0
 #cpuinfo/cci.20231129
 
 #[tool_requires]
