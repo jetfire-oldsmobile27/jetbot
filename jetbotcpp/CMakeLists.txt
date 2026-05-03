@@ -82,7 +82,7 @@ else()
     set(Boost_NO_WARN_NEW_VERSIONS ON)
     find_package(Boost REQUIRED COMPONENTS system regex json container thread)
     find_package(CURL REQUIRED)
-    find_package(VKAPI REQUIRED)
+    find_package(VKBOT REQUIRED)
     
     target_link_libraries(${PROJECT_NAME} PRIVATE
         tgbot::tgbot
@@ -92,19 +92,19 @@ else()
         indicators::indicators
         -static-libstdc++
         onnxruntime::onnxruntime
-        VKAPI::VKAPI
+        vkbot::vkbot
         nlohmann_json::nlohmann_json
     )
 
     add_executable(test-vk test-vk.cpp)
     target_link_libraries(test-vk PRIVATE
-        VKAPI::VKAPI
+        vkbot::vkbot
         nlohmann_json::nlohmann_json
-        CURL::libcurl
+        #CURL::libcurl
     )
     target_include_directories(test-vk PRIVATE ${CMAKE_SOURCE_DIR}/src)
-    target_compile_options(test-vk PRIVATE -fsanitize=address -g)
-    target_link_options(test-vk PRIVATE -fsanitize=address)
+    #target_compile_options(test-vk PRIVATE -fsanitize=address -g)
+    #target_link_options(test-vk PRIVATE -fsanitize=address)
 endif()
 
 # add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
