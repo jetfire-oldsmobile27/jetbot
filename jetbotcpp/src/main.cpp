@@ -78,6 +78,11 @@ const std::string COCO_NAMES_PATH = []() -> std::string {
                "coco.names";
 }();
 
+const std::string OLLAMA_IP = []() -> std::string {
+  const char* env = std::getenv("OLLAMA_IP");
+  return env ? env : "";
+}();
+
 void signalHandler(int) { running = false; }
 
 int main(int argc, char *argv[]) {

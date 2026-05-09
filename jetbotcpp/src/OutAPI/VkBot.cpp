@@ -56,7 +56,6 @@ static std::string uploadFileToVk(const std::string& url,
 }
 
 
-// Тип BotBase теперь в vk::bot, а не vk::base::bot
 using Bot = vk::bot::BotBase;
 using Json = vk::base::JsonType;
 

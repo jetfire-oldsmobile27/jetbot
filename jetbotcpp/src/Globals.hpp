@@ -49,3 +49,4 @@ const float CONF_THRESHOLD = 0.5f;
 const float NMS_THRESHOLD = 0.4f;
 const int RECORDING_DURATION = 60;
 const int INITIAL_RECORDING_DURATION = 60;
+extern const std::string OLLAMA_IP;
