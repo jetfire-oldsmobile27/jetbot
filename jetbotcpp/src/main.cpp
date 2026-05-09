@@ -10,6 +10,7 @@
 #include "ObserverLoop/VideoRecorder.hpp"
 #include "Utility/Debug-server/DebugServer.hpp"
 #include "Utility/Settings.hpp"
+#include "OutAPI/OllamaServer.hpp"
 #include <csignal>
 #include <filesystem>
 #include <iostream>
