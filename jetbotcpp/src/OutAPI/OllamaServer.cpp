@@ -55,7 +55,7 @@ namespace OutAPI {
 
         json::object payload;
         payload["model"] = model_name_;
-        payload[prompt] = prompt;
+        payload["prompt"] = prompt;
         payload["images"] = {
             base64_encode(reinterpret_cast<unsigned char*>(buffer.data()), buffer.size())
         };
