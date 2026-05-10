@@ -2,6 +2,7 @@
 
 #include <curl/curl.h>
 
+#include <memory>
 #include <vkbot/BotBase.hpp>        
 #include <vkbot/ClientBase.hpp>    
 
@@ -15,6 +16,7 @@
 #include "Globals.hpp"
 #include "Logging.hpp"
 #include "ObserverLoop/VideoRecorder.hpp"
+#include "OllamaServer.hpp"
 #include "Utility/Settings.hpp"
 
 
@@ -308,6 +310,11 @@ void vk_bot_thread(Utility::Settings& settings,
 {
     std::unordered_map<std::string, CommandHandler> commands;
 
+
+    auto ollama_srv = OutAPI::OllamaServer()
+                                                        .set_ip_adress(" 192.168.31.106")
+                                                        .set_model("huihui_ai/qwen3-vl-abliterated:4b");
+
     commands["start"] = [&](Bot& bot, int64_t peer_id, const std::string&) {
         int64_t uid = peer_id;
         if (authorizedUserId.load() == 0) {
@@ -330,12 +337,14 @@ void vk_bot_thread(Utility::Settings& settings,
 
     commands["photo"] = [&](Bot& bot, int64_t peer_id, const std::string&) {
         cv::Mat frame_copy;
-        { std::lock_guard<std::mutex> lock(frame_mutex);
+        { 
+            std::lock_guard<std::mutex> lock(frame_mutex);
           if (last_frame.empty()) {
               sendVkMessage(bot, peer_id, "⚠️ Нет данных с камеры.");
               return;
           }
-          frame_copy = last_frame.clone(); }
+          frame_copy = last_frame.clone(); 
+        }
         auto now = std::chrono::system_clock::now();
         auto t   = std::chrono::system_clock::to_time_t(now);
         std::ostringstream fn;
@@ -347,6 +356,33 @@ void vk_bot_thread(Utility::Settings& settings,
         }
         sendVkPhoto(bot, peer_id, tmp.string());
         std::filesystem::remove(tmp);
+    };
+
+    commands["ask"] = [&ollama_srv](Bot& bot, int64_t peer_id, const std::string& args) {
+        cv::Mat frame_copy;
+        {
+            std::lock_guard<std::mutex> lock(frame_mutex);
+          if (last_frame.empty()) {
+              sendVkMessage(bot, peer_id, "⚠️ Нет данных с камеры.");
+              return;
+          }
+          frame_copy = last_frame.clone(); 
+        }
+        auto response =  ollama_srv.send_request(frame_copy, args.empty() ? "Что ты видишь на этом изображении?Опиши подробно." : args);
+
+        if(response.has_value()) {
+            sendVkMessage(bot, peer_id, *response);
+        } else if(response.error() == OutAPI::OllamaServerError::BAD_ANSWER){
+            sendVkMessage(bot, peer_id, "Код возврата сервера отличен от ОК");
+        }else if(response.error() == OutAPI::OllamaServerError::BAD_CONNECTION){
+            sendVkMessage(bot, peer_id, "❌  Неусточивое соединения с сервисом распознавания");
+        }else if(response.error() == OutAPI::OllamaServerError::NO_IP_ADDDR){
+            sendVkMessage(bot, peer_id, "❌  IP адрес сервера распознавания задан неверно");
+        } else if(response.error() == OutAPI::OllamaServerError::NO_MODEL){
+            sendVkMessage(bot, peer_id, "❌  Указаннная модель распознавания не найдена на сервере");
+        } else {
+            sendVkMessage(bot, peer_id, "❌  Неизвестная ошибка при запросе на сервер");
+        };
     };
 
     commands["alert"] = [&](Bot& bot, int64_t peer_id, const std::string& args) {

@@ -25,6 +25,11 @@ namespace http = beast::http;
 namespace asio = boost::asio;
 
 namespace OutAPI {
+
+    OllamaServer::OllamaServer() {};
+
+    OllamaServer::~OllamaServer() {};
+
     OllamaServer& OllamaServer::set_model(const std::string& model_name) {
         model_name_ = model_name;
         return *this;
