@@ -368,7 +368,7 @@ void vk_bot_thread(Utility::Settings& settings,
           }
           frame_copy = last_frame.clone(); 
         }
-        auto response =  ollama_srv.send_request(frame_copy, args.empty() ? "Что ты видишь на этом изображении?Опиши подробно." : args);
+        auto response =  ollama_srv.send_request(frame_copy,  "Что ты видишь на этом изображении?Опиши подробно.");
 
         if(response.has_value()) {
             sendVkMessage(bot, peer_id, *response);
