@@ -6,6 +6,7 @@
 #include <iterator>
 #include <random>
 
+#include <vkbot/BotBase.hpp>
 #include "OutAPI/VkBot.hpp"
 #include "ObserverLoop/VideoRecorder.hpp"
 #include "Utility/Debug-server/DebugServer.hpp"
@@ -32,6 +33,7 @@ std::atomic<bool> alert_enabled{true};
 std::atomic<bool> detection_active{false};
 std::atomic<bool> unstopable_mode{false};
 std::atomic<int64_t> authorizedUserId{0};
+std::atomic<vk::bot::BotBase*> g_vk_bot{nullptr};
 
 cv::Mat last_frame;
 cv::Mat last_raw_frame;
@@ -139,7 +141,13 @@ int main(int argc, char *argv[]) {
   std::thread video_thread(video_processing_thread, nullptr, std::ref(recorder),
                            std::ref(settings), flags);
 
-  std::thread vk_thread(vk_bot_thread, std::ref(settings), std::ref(recorder));
+  auto vk_bot = std::make_unique<vk::bot::BotBase>(VK_GROUP_ID);
+  if (!vk_bot->auth(VK_ACCESS_TOKEN)) {
+      std::cerr << "VK Auth failed\n";
+      return 1;
+  }
+
+  std::thread vk_thread(vk_bot_thread, std::ref(settings), std::ref(recorder), std::ref(*vk_bot));
 
   // bot.getEvents().onCommand("start", [&](TgBot::Message::Ptr message) {
   //   auto user = message->from;
@@ -506,6 +514,7 @@ int main(int argc, char *argv[]) {
   while (running) {
     std::this_thread::sleep_for(std::chrono::seconds(1));
   }
+  vk_bot->interrupt();
   running = false;
   video_thread.join();
   vk_thread.join();

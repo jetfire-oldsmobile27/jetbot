@@ -81,14 +81,12 @@ else()
     
     set(Boost_NO_WARN_NEW_VERSIONS ON)
     find_package(Boost REQUIRED COMPONENTS system regex json container thread)
-    find_package(CURL REQUIRED)
     find_package(VKBOT REQUIRED)
     
     target_link_libraries(${PROJECT_NAME} PRIVATE
         tgbot::tgbot
         ${OpenCV_LIBS}
         Boost::boost
-        CURL::libcurl
         indicators::indicators
         -static-libstdc++
         onnxruntime::onnxruntime

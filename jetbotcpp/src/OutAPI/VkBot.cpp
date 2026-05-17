@@ -1,7 +1,5 @@
 #include "OutAPI/VkBot.hpp"
 
-#include <curl/curl.h>
-
 #include <memory>
 #include <vkbot/BotBase.hpp>        
 #include <vkbot/ClientBase.hpp>    
@@ -25,38 +23,6 @@ static int64_t generate_random_id() {
     return static_cast<int64_t>(vk::base::ClientBase::random_id());
 }
 
-static std::string uploadFileToVk(const std::string& url,
-                                  const std::string& filePath,
-                                  const std::string& fieldName) {
-    CURL* curl = curl_easy_init();
-    if (!curl) return "";
-
-    curl_mime*     mime = curl_mime_init(curl);
-    curl_mimepart* part = curl_mime_addpart(mime);
-    curl_mime_name(part, fieldName.c_str());
-    curl_mime_filedata(part, filePath.c_str());
-
-    std::string response;
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION,
-        +[](char* ptr, size_t size, size_t nmemb, std::string* data) -> size_t {
-            data->append(ptr, size * nmemb);
-            return size * nmemb;
-        });
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-
-    CURLcode res = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
-    curl_mime_free(mime);
-
-    if (res != CURLE_OK) {
-        std::cerr << "curl error: " << curl_easy_strerror(res) << '\n';
-        return "";
-    }
-    return response;
-}
-
 
 using Bot = vk::bot::BotBase;
 using Json = vk::base::JsonType;
@@ -66,7 +32,6 @@ static void sendVkMessage(Bot& bot, int64_t peer_id, const std::string& message)
     params["peer_id"]   = std::to_string(peer_id);
     params["message"]   = message;
     params["random_id"] = std::to_string(generate_random_id());
-    // send_request (snake_case), Method::SendMessage (новый enum)
     auto response = bot.send_request(Bot::Method::SendMessage, params);
     if (response.contains("error"))
         std::cerr << "VK sendMessage error: " << response.dump() << '\n';
@@ -91,21 +56,7 @@ static void sendVkPhoto(Bot& bot, int64_t peer_id, const std::string& file_path)
         }
         std::string upload_url = upload_server["response"]["upload_url"].get<std::string>();
 
-        std::string response = uploadFileToVk(upload_url, file_path, "photo");
-        if (response.empty()) {
-            sendVkMessage(bot, peer_id, "❌ Ошибка загрузки файла на сервер VK.");
-            return;
-        }
-
-        Json json_response;
-        try {
-            json_response = Json::parse(response);
-        } catch (const std::exception& e) {
-            std::cerr << "Failed to parse upload response: " << response
-                      << " error: " << e.what() << '\n';
-            sendVkMessage(bot, peer_id, "❌ Ошибка парсинга ответа от сервера.");
-            return;
-        }
+        Json json_response = bot.send_file_request(upload_url, file_path, "photo");
 
         if (!json_response.contains("photo") || !json_response.contains("server") ||
             !json_response.contains("hash")) {
@@ -184,86 +135,43 @@ static void sendVkPhoto(Bot& bot, int64_t peer_id, const std::string& file_path)
 
 static void sendVkDocument(Bot& bot, int64_t peer_id,
                            const std::string& file_path,
-                           const std::string& type_hint = "") {
+                           const std::string& /*type_hint*/ = "") {
     try {
         Json params;
         params["peer_id"] = std::to_string(peer_id);
-        params["type"]    = "doc";
+        params["type"] = "doc";
         auto upload_server = bot.send_request("docs.getMessagesUploadServer", params);
-        if (upload_server.contains("error")) {
-            std::cerr << "getMessagesUploadServer error: " << upload_server.dump() << '\n';
-            sendVkMessage(bot, peer_id, "❌ Ошибка получения сервера для загрузки документа.");
-            return;
-        }
-        if (!upload_server.contains("response") ||
+        if (upload_server.contains("error") ||
             !upload_server["response"].contains("upload_url")) {
-            std::cerr << "Invalid upload server response: " << upload_server.dump() << '\n';
-            sendVkMessage(bot, peer_id, "❌ Неверный ответ от сервера VK.");
+            std::cerr << "getMessagesUploadServer error: " << upload_server.dump() << '\n';
+            sendVkMessage(bot, peer_id, "❌ Ошибка получения сервера для загрузки.");
             return;
         }
-        std::string upload_url = upload_server["response"]["upload_url"].get<std::string>();
+        std::string upload_url = upload_server["response"]["upload_url"];
 
-        std::string response = uploadFileToVk(upload_url, file_path, "file");
-        if (response.empty()) {
+        Json upload_response = bot.send_file_request(upload_url, file_path, "file");
+        if (!upload_response.contains("file")) {
+            std::cerr << "Upload failed, response: " << upload_response.dump() << '\n';
             sendVkMessage(bot, peer_id, "❌ Ошибка загрузки файла на сервер VK.");
             return;
         }
 
-        Json json_response;
-        try {
-            json_response = Json::parse(response);
-        } catch (const std::exception& e) {
-            std::cerr << "Failed to parse upload response: " << response
-                      << " error: " << e.what() << '\n';
-            sendVkMessage(bot, peer_id, "❌ Ошибка парсинга ответа от сервера.");
-            return;
-        }
-
-        if (!json_response.contains("file")) {
-            std::cerr << "Missing 'file' in upload response: " << json_response.dump() << '\n';
-            sendVkMessage(bot, peer_id, "❌ Неполный ответ от сервера загрузки.");
-            return;
-        }
-
         Json save_params;
-        auto& file_val = json_response["file"];
-        if (file_val.is_string())
-            save_params["file"] = file_val.get<std::string>();
-        else if (file_val.is_number())
-            save_params["file"] = std::to_string(file_val.get<int64_t>());
-        else
-            save_params["file"] = file_val.dump();
-
+        save_params["file"] = upload_response["file"].get<std::string>();
         auto saved = bot.send_request("docs.save", save_params);
-        if (saved.contains("error")) {
+        if (saved.contains("error") || !saved["response"].contains("doc")) {
             std::cerr << "docs.save error: " << saved.dump() << '\n';
-            sendVkMessage(bot, peer_id, "❌ Ошибка сохранения документа в VK.");
-            return;
-        }
-        if (!saved.contains("response") || !saved["response"].contains("doc")) {
-            std::cerr << "Invalid save response: " << saved.dump() << '\n';
-            sendVkMessage(bot, peer_id, "❌ Ошибка: документ не сохранён.");
+            sendVkMessage(bot, peer_id, "❌ Ошибка сохранения документа.");
             return;
         }
 
-        auto doc_info = saved["response"]["doc"];
-        if (!doc_info.contains("owner_id") || !doc_info.contains("id")) {
-            std::cerr << "Missing owner_id or id in doc info: " << doc_info.dump() << '\n';
-            sendVkMessage(bot, peer_id, "❌ Ошибка получения данных документа.");
-            return;
-        }
-
-        // get<int>() работает нормально — тип doc_info не dependent здесь
-        std::string attachment = "doc"
-            + std::to_string(doc_info["owner_id"].get<int>())
-            + "_"
-            + std::to_string(doc_info["id"].get<int>());
-
+        auto& doc = saved["response"]["doc"];
+        std::string attachment = "doc" + std::to_string(doc["owner_id"].get<int>())
+                                 + "_" + std::to_string(doc["id"].get<int>());
         Json msg_params;
         msg_params["peer_id"]    = std::to_string(peer_id);
         msg_params["attachment"] = attachment;
         msg_params["random_id"]  = std::to_string(generate_random_id());
-
         auto msg_response = bot.send_request(Bot::Method::SendMessage, msg_params);
         if (msg_response.contains("error")) {
             std::cerr << "send document message error: " << msg_response.dump() << '\n';
@@ -306,7 +214,8 @@ static Json createMainMenuKeyboard() {
 
 
 void vk_bot_thread(Utility::Settings& settings,
-                   ObserverLoop::VideoRecorder& recorder)
+                   ObserverLoop::VideoRecorder& recorder,
+                   vk::bot::BotBase& bot_vk)
 {
     std::unordered_map<std::string, CommandHandler> commands;
 
@@ -339,11 +248,11 @@ void vk_bot_thread(Utility::Settings& settings,
         cv::Mat frame_copy;
         { 
             std::lock_guard<std::mutex> lock(frame_mutex);
-          if (last_frame.empty()) {
+          if (last_raw_frame.empty()) {
               sendVkMessage(bot, peer_id, "⚠️ Нет данных с камеры.");
               return;
           }
-          frame_copy = last_frame.clone(); 
+          frame_copy = last_raw_frame.clone(); 
         }
         auto now = std::chrono::system_clock::now();
         auto t   = std::chrono::system_clock::to_time_t(now);
@@ -354,7 +263,16 @@ void vk_bot_thread(Utility::Settings& settings,
             sendVkMessage(bot, peer_id, "❌ Ошибка сохранения кадра.");
             return;
         }
-        sendVkPhoto(bot, peer_id, tmp.string());
+        try {
+            auto response = bot.send_photo(peer_id, tmp.string());
+            if (response.contains("error")) {
+                std::cerr << "send_photo error: " << response.dump() << '\n';
+                sendVkMessage(bot, peer_id, "❌ Ошибка отправки фото.");
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Exception in sendVkPhoto: " << e.what() << '\n';
+            sendVkMessage(bot, peer_id, "❌ Внутренняя ошибка при отправке фото.");
+        }
         std::filesystem::remove(tmp);
     };
 
@@ -362,11 +280,11 @@ void vk_bot_thread(Utility::Settings& settings,
         cv::Mat frame_copy;
         {
             std::lock_guard<std::mutex> lock(frame_mutex);
-          if (last_frame.empty()) {
+          if (last_raw_frame.empty()) {
               sendVkMessage(bot, peer_id, "⚠️ Нет данных с камеры.");
               return;
           }
-          frame_copy = last_frame.clone(); 
+          frame_copy = last_raw_frame.clone(); 
         }
         auto response =  ollama_srv.send_request(frame_copy,  "Что ты видишь на этом изображении?Опиши подробно.");
 
@@ -564,15 +482,6 @@ void vk_bot_thread(Utility::Settings& settings,
     // ---------- Основной цикл ----------
     while (running) {
         try {
-            Bot bot_vk(VK_GROUP_ID);
-
-            // auth() вместо Auth()
-            if (!bot_vk.auth(VK_ACCESS_TOKEN)) {
-                std::cerr << "VK Auth failed, retrying in 5s...\n";
-                std::this_thread::sleep_for(std::chrono::seconds(5));
-                continue;
-            }
-            std::cout << "VK bot started\n";
 
             while (running) {
                 Bot::EventData event{};

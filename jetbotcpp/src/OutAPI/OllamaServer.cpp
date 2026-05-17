@@ -60,6 +60,12 @@ namespace OutAPI {
             base64_encode(reinterpret_cast<unsigned char*>(buffer.data()), buffer.size())
         };
         payload["stream"] = false;
+        payload["system"] = "Ты система распознавания. Старайся отвечать кратко что видишь и по факту.";
+        payload["think"] = "low";
+
+        json::object options_obj;
+            options_obj["temperature"] = 0.8;
+        payload["options"] = options_obj;
 
         asio::io_context io_ctx;
         asio::ip::tcp::resolver resolver(io_ctx);
@@ -86,8 +92,10 @@ namespace OutAPI {
         }
 
         auto response_json = json::parse(response);
+
         auto response_json_value = response_json.at("response").as_string().c_str();
-        std::cout << "parsed str from json ollama response " << response_json_value << std::endl;
+        auto response_json_done_reason = response_json.at("done_reason").as_string().c_str();
+        std::cout << "parsed str from json ollama response " << response_json_value << "\ndone reason:" << response_json_done_reason << std::endl;
         
         socket.shutdown(asio::ip::tcp::socket::shutdown_both);
         std::cout << "ollama(full json): \n " << response << '\n' << std::endl;
