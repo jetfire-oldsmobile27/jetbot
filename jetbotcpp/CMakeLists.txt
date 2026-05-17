@@ -58,7 +58,7 @@ if(ON_SBC)
     find_package(Threads REQUIRED)
     find_package(OpenSSL REQUIRED)
     set(Boost_NO_WARN_NEW_VERSIONS ON)
-    find_package(Boost REQUIRED COMPONENTS system regex json container thread)
+    find_package(Boost REQUIRED COMPONENTS system regex json container thread filesystem)
     find_package(CURL REQUIRED)
     find_package(nlohmann_json REQUIRED)
 
@@ -80,13 +80,19 @@ else()
     find_package(tgbot CONFIG REQUIRED)
     
     set(Boost_NO_WARN_NEW_VERSIONS ON)
-    find_package(Boost REQUIRED COMPONENTS system regex json container thread)
+    find_package(Boost REQUIRED COMPONENTS system regex json container thread filesystem)
     find_package(VKBOT REQUIRED)
+    message(STATUS "Boost version: ${Boost_VERSION}")
+    message(STATUS "Boost include dirs: ${Boost_INCLUDE_DIRS}")
+    message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
+    message(STATUS "Boost::filesystem location: $<TARGET_FILE:Boost::filesystem>")
     
     target_link_libraries(${PROJECT_NAME} PRIVATE
         tgbot::tgbot
         ${OpenCV_LIBS}
         Boost::boost
+        Boost::system
+        Boost::filesystem   # was missing for this target
         indicators::indicators
         -static-libstdc++
         onnxruntime::onnxruntime
@@ -97,6 +103,7 @@ else()
     add_executable(test-vk test-vk.cpp)
     target_link_libraries(test-vk PRIVATE
         vkbot::vkbot
+        Boost::filesystem
         nlohmann_json::nlohmann_json
         #CURL::libcurl
     )
