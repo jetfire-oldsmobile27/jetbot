@@ -3,9 +3,6 @@
 #include "Logging.hpp"
 #include "VideoThread.hpp"
 
-#include <iterator>
-#include <random>
-
 #include <vkbot/BotBase.hpp>
 #include "OutAPI/VkBot.hpp"
 #include "ObserverLoop/VideoRecorder.hpp"

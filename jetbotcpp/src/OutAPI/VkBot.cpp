@@ -1,6 +1,6 @@
 #include "OutAPI/VkBot.hpp"
 
-#include <memory>
+#include <format>
 #include <vkbot/BotBase.hpp>        
 #include <vkbot/ClientBase.hpp>    
 
@@ -8,7 +8,6 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <random>
 #include <sstream>
 
 #include "Globals.hpp"
@@ -197,6 +196,7 @@ static void sendVkMessageWithKeyboard(Bot& bot, int64_t peer_id,
 }
 
 static Json createMainMenuKeyboard() {
+    std::cout << "createMainMenuKeyboard()";
     Json keyboard;
     keyboard["one_time"] = false;
     keyboard["buttons"] = Json::array({
@@ -245,6 +245,12 @@ void vk_bot_thread(Utility::Settings& settings,
     };
 
     commands["photo"] = [&](Bot& bot, int64_t peer_id, const std::string&) {
+        try {
+            Json empty;
+            bot.send_request(Bot::Method::MarkAsRead, empty);
+        } catch(...) {
+            logMsg("❌ Не удалось поставить статус \"Прочитано\" ");
+        }
         cv::Mat frame_copy;
         { 
             std::lock_guard<std::mutex> lock(frame_mutex);
@@ -277,6 +283,12 @@ void vk_bot_thread(Utility::Settings& settings,
     };
 
     commands["ask"] = [&ollama_srv](Bot& bot, int64_t peer_id, const std::string& args) {
+        try {
+            Json empty;
+            bot.send_request(Bot::Method::MarkAsRead, empty);
+        } catch(...) {
+            logMsg("❌ Не удалось поставить статус \"Прочитано\" ");
+        }
         cv::Mat frame_copy;
         {
             std::lock_guard<std::mutex> lock(frame_mutex);
@@ -293,7 +305,7 @@ void vk_bot_thread(Utility::Settings& settings,
         } else if(response.error() == OutAPI::OllamaServerError::BAD_ANSWER){
             sendVkMessage(bot, peer_id, "Код возврата сервера отличен от ОК");
         }else if(response.error() == OutAPI::OllamaServerError::BAD_CONNECTION){
-            sendVkMessage(bot, peer_id, "❌  Неусточивое соединения с сервисом распознавания");
+            sendVkMessage(bot, peer_id, "❌  Неусточивое соединение с сервисом распознавания");
         }else if(response.error() == OutAPI::OllamaServerError::NO_IP_ADDDR){
             sendVkMessage(bot, peer_id, "❌  IP адрес сервера распознавания задан неверно");
         } else if(response.error() == OutAPI::OllamaServerError::NO_MODEL){
@@ -410,6 +422,12 @@ void vk_bot_thread(Utility::Settings& settings,
     };
 
     commands["temp"] = [&](Bot& bot, int64_t peer_id, const std::string&) {
+        try {
+            Json empty;
+            bot.send_request(Bot::Method::MarkAsRead, empty);
+        } catch(...) {
+            logMsg("❌ Не удалось поставить статус \"Прочитано\" ");
+        }
         std::ostringstream report;
         bool found = false;
         const std::filesystem::path thermalDir{"/sys/class/thermal"};
@@ -503,7 +521,7 @@ void vk_bot_thread(Utility::Settings& settings,
  
                 
                 if (event.type == Bot::Event::Unknown) {
-                    //std::this_thread::sleep_for(std::chrono::milliseconds(200));
+                    logMsg(std::format("❌ Бот получил неизвестный ивент, payload: {}", event.payload.dump()));
                     continue;
                 }
 
