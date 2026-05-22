@@ -8,7 +8,7 @@ onnxruntime/1.18.1
 nlohmann_json/3.11.3
 vkbot/0.1.0@jetfire27/stable
 openssl/3.6.0
-#cpuinfo/cci.20231129
+cpuinfo/cci.20231129
 
 #[tool_requires]
 #cmake/3.31.12
@@ -20,7 +20,13 @@ opencv/*:with_ffmpeg=True
 opencv/*:with_eigen=False
 xkbcommon/*:with_x11=False
 ffmpeg/*:with_pulse=False
+ffmpeg/*:with_xcb=False
+ffmpeg/*:with_xlib=False
+ffmpeg/*:with_vaapi=False
+ffmpeg/*:with_vdpau=False
+ffmpeg/*:with_libalsa=False
 */*:shared=False
+libx265/*:assembly=False
 
 [generators]
 CMakeToolchain

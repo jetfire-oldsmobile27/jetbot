@@ -1,0 +1,26 @@
+[settings]
+os=Linux
+arch=armv8
+build_type=Release
+compiler=gcc
+compiler.cppstd=gnu23
+compiler.libcxx=libstdc++11
+compiler.version=13
+
+[options]
+*/*:shared=False
+
+[conf]
+tools.build:compiler_executables={"c": "/usr/bin/aarch64-linux-gnu-gcc", "cpp": "/usr/bin/aarch64-linux-gnu-g++", "ar": "/usr/bin/aarch64-linux-gnu-ar", "strip": "/usr/bin/aarch64-linux-gnu-strip", "nm": "/usr/bin/aarch64-linux-gnu-nm", "ranlib": "/usr/bin/aarch64-linux-gnu-ranlib"}
+tools.cmake.cmaketoolchain:system_name=Linux
+tools.cmake.cmaketoolchain:system_processor=aarch64
+tools.cmake.cmaketoolchain:generator=Ninja
+tools.system.package_manager:mode=report-installed
+tools.system.package_manager:sudo=True
+
+[buildenv]
+STRIP=/usr/bin/aarch64-linux-gnu-strip
+NM=/usr/bin/aarch64-linux-gnu-nm
+RANLIB=/usr/bin/aarch64-linux-gnu-ranlib
+AR=/usr/bin/aarch64-linux-gnu-ar
+AS=/usr/bin/aarch64-linux-gnu-as

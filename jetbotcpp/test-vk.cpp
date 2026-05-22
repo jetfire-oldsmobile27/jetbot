@@ -1,3 +1,5 @@
+#include <cstddef>
+#include <cstdlib>
 #include <iostream>
 #include <vkbot/BotBase.hpp>
 
