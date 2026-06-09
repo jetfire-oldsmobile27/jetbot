@@ -571,8 +571,8 @@ void vk_bot_thread(Utility::Settings& settings,
                             std::istringstream iss(text);
                             iss >> command_to_execute;
                             std::getline(iss >> std::ws, command_args);
-                            if (!command_to_execute.empty() && command_to_execute[0] == '/')
-                                command_to_execute = command_to_execute.substr(1);
+                            // if (!command_to_execute.empty() && command_to_execute[0] == '/')
+                            //     {command_to_execute = command_to_execute.substr(1);}
                         }
 
                         if (!command_to_execute.empty()) {
