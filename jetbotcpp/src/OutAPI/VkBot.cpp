@@ -201,12 +201,12 @@ static Json createMainMenuKeyboard() {
     keyboard["one_time"] = false;
     keyboard["buttons"] = Json::array({
         Json::array({
-            Json{{"action", Json{{"type","text"},{"payload","{\"command\":\"/photo\"}"},{"label","📸 Фото"}}},   {"color","primary"}},
-            Json{{"action", Json{{"type","text"},{"payload","{\"command\":\"/last\"}"},{"label","🎥 Последнее видео"}}}, {"color","secondary"}}
+            Json{{"action", Json{{"type","text"},{"payload","{\"command\":\"photo\"}"},{"label","📸 Фото"}}},   {"color","primary"}},
+            Json{{"action", Json{{"type","text"},{"payload","{\"command\":\"last\"}"},{"label","🎥 Последнее видео"}}}, {"color","secondary"}}
         }),
         Json::array({
-            Json{{"action", Json{{"type","text"},{"payload","{\"command\":\"/status\"}"},{"label","📊 Статус"}}},      {"color","secondary"}},
-            Json{{"action", Json{{"type","text"},{"payload","{\"command\":\"/alert\"}"},{"label","🔔 Уведомления"}}},  {"color","secondary"}}
+            Json{{"action", Json{{"type","text"},{"payload","{\"command\":\"status\"}"},{"label","📊 Статус"}}},      {"color","secondary"}},
+            Json{{"action", Json{{"type","text"},{"payload","{\"command\":\"alert\"}"},{"label","🔔 Уведомления"}}},  {"color","secondary"}}
         })
     });
     return keyboard;
@@ -571,9 +571,10 @@ void vk_bot_thread(Utility::Settings& settings,
                             std::istringstream iss(text);
                             iss >> command_to_execute;
                             std::getline(iss >> std::ws, command_args);
-                            // if (!command_to_execute.empty() && command_to_execute[0] == '/')
-                            //     {command_to_execute = command_to_execute.substr(1);}
                         }
+
+                        if (!command_to_execute.empty() && command_to_execute[0] == '/')
+                            command_to_execute = command_to_execute.substr(1);
 
                         if (!command_to_execute.empty()) {
                             auto it = commands.find(command_to_execute);
