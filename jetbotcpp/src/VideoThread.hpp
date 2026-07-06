@@ -90,27 +90,39 @@ void video_processing_thread(TgBot::Bot* bot,
 
     // Траблы камеры
     if (!cap.isOpened()) {
-      cap.open(CAMERA_INDEX);
-      if (cap.isOpened()) {
-        cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
-        cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
-        cap.set(cv::CAP_PROP_FPS, FPS);
-      } else {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        if (now - last_frame_time > std::chrono::seconds(10)) {
-          std::lock_guard<std::mutex> lk(frame_mutex);
-          last_raw_frame.release();
-        }
+      // Переоткрытие с теми же настройками
+      cap.open(CAMERA_INDEX, cv::CAP_V4L2);
+      if (!cap.isOpened()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
         continue;
       }
+      cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('Y', 'U', 'Y', 'V'));
+      cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+      cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+      cap.set(cv::CAP_PROP_FPS, FPS);
     }
 
-    // Захват кадра 
-    cv::Mat frame;
-    if (!cap.read(frame) || frame.empty()) {
+    cv::Mat frame_raw;
+    if (!cap.grab()) {
       cap.release();
       continue;
     }
+    cap.retrieve(frame_raw, 0);
+    if (frame_raw.empty()) {
+      cap.release();
+      continue;
+    }
+
+    cv::Mat frame;
+    if (frame_raw.channels() == 2) {
+      cv::cvtColor(frame_raw, frame, cv::COLOR_YUV2BGR_YUYV);
+    } else if (frame_raw.channels() == 3) {
+      // Иногда v4l2-compat может отдать RGB
+      cv::cvtColor(frame_raw, frame, cv::COLOR_RGB2BGR);
+    } else {
+      continue;
+    }
+
     last_frame_time = now;
 
     {
@@ -118,7 +130,7 @@ void video_processing_thread(TgBot::Bot* bot,
       frame.copyTo(last_raw_frame);
     }
 
-    // Детекция YOLO 
+    // Детекция YOLO
     if (det_ptr_) {
       auto detection_result = det_ptr_->detect(frame);
       if (detection_result) {
@@ -186,7 +198,7 @@ void video_processing_thread(TgBot::Bot* bot,
       processed.copyTo(last_frame);
     }
 
-    // Запись видео 
+    // Запись видео
     if (flags.recording) {
       //   if (!tracked_objects.empty()) {
       //     last_detection_time = current_time;
@@ -226,7 +238,7 @@ void video_processing_thread(TgBot::Bot* bot,
       }
     }
 
-    // Ограничение FPS и фоновая очистка 
+    // Ограничение FPS и фоновая очистка
     auto loop_end = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                        loop_end - loop_start)

@@ -1,27 +1,32 @@
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <opencv2/core.hpp>
-#include <opencv2/imgproc.hpp>
 #include <opencv2/dnn/dnn.hpp>
+#include <opencv2/imgproc.hpp>
 #include <opencv2/objdetect.hpp>
 #include <opencv2/videoio.hpp>
-#include <fstream>
-
 
 namespace Startup {
 
 class StartupManager {
-public:
-
-   // @todo Maybe width&height in init?
+ public:
+  // @todo Maybe width&height in init?
   StartupManager(int width, int height)
-      : width_(width), height_(height), center_x_(width / 2),
-        center_y_(height / 2), circle_radius_(30), circle_distance_(120),
-        animation_phase_(0), start_time_(std::chrono::steady_clock::now()),
-        initialization_complete_(false), initialization_progress_(0.0f),
-        cam_index_(-1), loading_text_("INITIALIZING SYSTEM"),
-        pulse_value_(0.0f), camera_error_count_(0) {
-
+      : width_(width),
+        height_(height),
+        center_x_(width / 2),
+        center_y_(height / 2),
+        circle_radius_(30),
+        circle_distance_(120),
+        animation_phase_(0),
+        start_time_(std::chrono::steady_clock::now()),
+        initialization_complete_(false),
+        initialization_progress_(0.0f),
+        cam_index_(-1),
+        loading_text_("INITIALIZING SYSTEM"),
+        pulse_value_(0.0f),
+        camera_error_count_(0) {
     // Создаем 3 круга под углом 120 градусов
     for (int i = 0; i < 3; ++i) {
       float angle = 2 * M_PI * i / 3;
@@ -38,7 +43,7 @@ public:
                        std::chrono::steady_clock::now() - start_time_)
                        .count();
     cv::Mat anim_frame = cv::Mat::zeros(height_, width_, CV_8UC3);
-    float pulse_speed = 0.5f; // Скорость пульсации
+    float pulse_speed = 0.5f;  // Скорость пульсации
 
     // Фаза 0: Пульсация кругов во время инициализации
     if (animation_phase_ == 0) {
@@ -46,7 +51,7 @@ public:
       pulse_value_ = sin(elapsed * pulse_speed * 2 * M_PI) * 0.2f + 0.8f;
       int pulse_size = static_cast<int>(circle_radius_ * pulse_value_);
 
-      for (auto &circle : circles_) {
+      for (auto& circle : circles_) {
         // Отрисовка круга
         cv::circle(anim_frame, cv::Point(circle.x, circle.y), pulse_size,
                    cv::Scalar(255, 255, 255), -1);
@@ -76,7 +81,7 @@ public:
     }
     // Фаза 1: Основная анимация (схлопывание кругов)
     else if (animation_phase_ == 1) {
-      elapsed = elapsed - 0.5f; // Задержка перед началом анимации
+      elapsed = elapsed - 0.5f;  // Задержка перед началом анимации
       // Параметры анимации
       float text_alpha = 0.0f;
       int bar_width_left = 0;
@@ -86,7 +91,7 @@ public:
 
       // Фаза 1.1: Вращение кругов и появление полос (0-1.2 сек)
       if (elapsed < 1.2f) {
-        float rotation = elapsed * 1.5f; // Быстрое вращение
+        float rotation = elapsed * 1.5f;  // Быстрое вращение
         for (size_t i = 0; i < circles_.size(); ++i) {
           float angle = 2 * M_PI * i / 3 + rotation;
           circles_[i].x =
@@ -104,7 +109,7 @@ public:
       // Фаза 1.2: Схлопывание кругов и появление видео (1.2-2.0 сек)
       else if (elapsed < 2.0f) {
         float progress = (elapsed - 1.2f) / 0.8f;
-        for (auto &circle : circles_) {
+        for (auto& circle : circles_) {
           // Плавное перемещение к центру
           circle.x =
               static_cast<int>(circle.x + (center_x_ - circle.x) * progress);
@@ -117,7 +122,7 @@ public:
 
       // Отрисовка кругов
       float progress = std::min(1.0f, (elapsed - 1.2f) / 0.8f);
-      for (auto &circle : circles_) {
+      for (auto& circle : circles_) {
         int radius =
             static_cast<int>(circle_radius_ * (1 - progress) * pulse_value_);
         cv::circle(anim_frame, cv::Point(circle.x, circle.y), radius,
@@ -175,44 +180,65 @@ public:
     return anim_frame;
   }
 
-bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps, int width, int height, cv::Mat& frame) {
-    const int MAX_CAMERAS = 10;
-    std::vector<int> indices;
-    
-    indices.push_back(preferred_index);
-    for (int i = 0; i < MAX_CAMERAS; ++i) {
-        if (i != preferred_index) {
-            indices.push_back(i);
-        }
-    }
+  bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index,
+                              int fps, int width, int height, cv::Mat& frame) {
+    auto tryOpen = [&](int idx) -> bool {
+      cap.open(idx, cv::CAP_V4L2);
+      if (!cap.isOpened()) return false;
 
-    for (int idx : indices) {
-        std::cout << "Попытка открыть камеру с индексом: " << idx << std::endl;
-        cap.open(idx, cv::CAP_V4L);
-        if (cap.isOpened()) {
-            cap.set(cv::CAP_PROP_FRAME_WIDTH, width);
-            cap.set(cv::CAP_PROP_FRAME_HEIGHT, height);
-            cap.set(cv::CAP_PROP_FPS, fps);
-            
-            cv::Mat test_frame;
-            if (cap.read(test_frame)) {
-                cv::resize(test_frame, frame, cv::Size(width, height));
-                std::cout << "Камера успешно открыта с индексом: " << idx << std::endl;
-                return true;
-            } else {
-                std::cerr << "Камера с индексом " << idx << " открыта, но не удалось получить кадр." << std::endl;
-                cap.release();
-            }
+      cap.set(cv::CAP_PROP_FOURCC, cv::VideoWriter::fourcc('Y', 'U', 'Y', 'V'));
+      cap.set(cv::CAP_PROP_FRAME_WIDTH, width);
+      cap.set(cv::CAP_PROP_FRAME_HEIGHT, height);
+      cap.set(cv::CAP_PROP_FPS, fps);
+
+      try {
+        if (!cap.grab()) {
+          cap.release();
+          return false;
+        }
+        cv::Mat raw;
+        cap.retrieve(raw, 0);
+        if (raw.empty()) {
+          cap.release();
+          return false;
+        }
+
+        std::cout << "Raw frame: " << raw.cols << "x" << raw.rows
+                  << " ch=" << raw.channels() << " type=" << raw.type()
+                  << std::endl;
+
+        // libcamera через v4l2-compat отдаёт YUYV (2 канала)
+        if (raw.channels() == 2) {
+          cv::cvtColor(raw, frame, cv::COLOR_YUV2BGR_YUYV);
+        } else if (raw.channels() == 3) {
+          // Редкий случай – RGB
+          cv::cvtColor(raw, frame, cv::COLOR_RGB2BGR);
         } else {
-            std::cerr << "Не удалось открыть камеру с индексом: " << idx << std::endl;
+          cap.release();
+          return false;
         }
-    }
-    
-    std::cerr << "Не удалось открыть ни одну камеру." << std::endl;
-    return false;
-}
 
-  void initialize(const std::string& resource_dir, const int camera_index, const int fps) {
+        std::cout << "Камера открыта: " << idx << " " << frame.cols << "x"
+                  << frame.rows << " ch=" << frame.channels() << std::endl;
+        return true;
+
+      } catch (const cv::Exception& e) {
+        std::cerr << "Exception: " << e.what() << std::endl;
+        cap.release();
+        return false;
+      }
+    };
+
+    if (tryOpen(preferred_index)) return true;
+    for (int i = 0; i < 10; ++i) {
+      if (i == preferred_index) continue;
+      if (tryOpen(i)) return true;
+    }
+    return false;
+  }
+
+  void initialize(const std::string& resource_dir, const int camera_index,
+                  const int fps) {
     // Шаг 1: Загрузка классов
     loading_text_ = "LOADING CLASSES";
     std::string classes_path = resource_dir + "/coco.names";
@@ -228,7 +254,7 @@ bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps,
     } else {
       std::cerr << "Не удалось загрузить классы из: " << classes_path
                 << std::endl;
-      classes_ = {"person"}; // Минимальный набор
+      classes_ = {"person"};  // Минимальный набор
     }
 
     // Шаг 2: Инициализация YOLO
@@ -266,7 +292,7 @@ bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps,
       }
 
       initialization_progress_ = 0.6f;
-    } catch (const cv::Exception &e) {
+    } catch (const cv::Exception& e) {
       std::cerr << "Не удалось загрузить YOLO: " << e.what() << std::endl;
     } catch (...) {
       std::cerr << "Не удалось загрузить YOLO: неизвестная ошибка" << std::endl;
@@ -284,7 +310,7 @@ bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps,
         "/opt/opencv/data/haarcascades/haarcascade_frontalface_default.xml"};
 
     bool cascade_loaded = false;
-    for (const auto &path : cascade_paths) {
+    for (const auto& path : cascade_paths) {
       if (std::filesystem::exists(path) && face_cascade_.load(path)) {
         cascade_loaded = true;
         std::cout << "Детектор лиц загружен из: " << path << std::endl;
@@ -304,9 +330,12 @@ bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps,
 
     // Шаг 4: Открытие камеры
     loading_text_ = "CONNECTING CAMERA";
-    if (openCameraWithFallback(cap_, camera_index, fps, width_, height_, frame_)) {
+    if (openCameraWithFallback(cap_, camera_index, fps, width_, height_,
+                               frame_)) {
     } else {
-        std::cerr << "Камера не открыта. Программа продолжит работу без видеопотока." << std::endl;
+      std::cerr
+          << "Камера не открыта. Программа продолжит работу без видеопотока."
+          << std::endl;
     }
 
     initialization_progress_ = 1.0f;
@@ -325,9 +354,9 @@ bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps,
 
   cv::CascadeClassifier getFaceCascade() const { return face_cascade_; }
 
-  cv::VideoCapture &getCapture() { return cap_; }
+  cv::VideoCapture& getCapture() { return cap_; }
 
-private:
+ private:
   struct Circle {
     int x;
     int y;
@@ -359,4 +388,4 @@ private:
   cv::CascadeClassifier face_cascade_;
 };
 
-}; // namespace Startup
+};  // namespace Startup

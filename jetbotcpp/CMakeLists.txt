@@ -31,6 +31,8 @@ file(GLOB_RECURSE PROJECT_SOURCES
     ${CMAKE_SOURCE_DIR}/src/*.cpp
 )
 
+list(REMOVE_ITEM PROJECT_SOURCES ${CMAKE_SOURCE_DIR}/src/test_camera.cpp)
+
 function(add_all_include_directories base_dir)
     file(GLOB children RELATIVE ${base_dir} ${base_dir}/*)
     foreach(child ${children})
@@ -53,26 +55,38 @@ add_executable(${PROJECT_NAME}
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
 add_all_include_directories(${CMAKE_SOURCE_DIR}/src)
 
+# Тестовое приложение для камеры (только OpenCV)
+add_executable(test_camera src/test_camera.cpp)
+target_link_libraries(test_camera PRIVATE ${OpenCV_LIBS})
+if(CMAKE_THREAD_LIBS_INIT)
+    target_link_libraries(test_camera PRIVATE ${CMAKE_THREAD_LIBS_INIT})
+endif()
+
+target_compile_definitions(test_camera PRIVATE -DUSE_V4L2)
+
 if(ON_SBC)
     message(STATUS "Platform build: Single-board computer (ARM-based)")
     find_package(Threads REQUIRED)
     find_package(OpenSSL REQUIRED)
+    find_package(tgbot CONFIG REQUIRED)
     set(Boost_NO_WARN_NEW_VERSIONS ON)
     find_package(Boost REQUIRED COMPONENTS system regex json container thread filesystem)
     find_package(CURL REQUIRED)
     find_package(nlohmann_json REQUIRED)
 
     target_link_libraries(${PROJECT_NAME} PRIVATE
-        /usr/local/lib/libTgBot.a
+        tgbot::tgbot
         ${CMAKE_THREAD_LIBS_INIT}
         ${OPENSSL_LIBRARIES}
-        ${Boost_LIBRARIES}
-        boost_json
-        boost_container
+        Boost::boost
+        Boost::system
+        Boost::filesystem
+        Boost::thread
         ${CURL_LIBRARIES}
         ${OpenCV_LIBS}
         indicators::indicators
         onnxruntime::onnxruntime
+        nlohmann_json::nlohmann_json
     )
 
 else()
@@ -119,6 +133,15 @@ endif()
 #     COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/../test-vision/haarcascade_frontalface_default.xml ${CMAKE_BINARY_DIR}
 # )
 
+#sudo apt install qemu-user-static binfmt-support patchelf
+
+#wget https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-aarch64.AppImage -O /usr/local/bin/appimagetool
+#chmod +x /usr/local/bin/appimagetool
+
+# После установки qemu-user-static ARM64 бинарники запускаются прозрачно
+#cd build-arm64
+#cpack -C Release
+set(CPACK_APPIMAGE_ARCH "aarch64")
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 4.2)
     message(STATUS "CMake ${CMAKE_VERSION} supports CPack AppImage generator")
     

@@ -19,12 +19,13 @@ opencv/*:with_ffmpeg=True
 */*:with_protobuf=False
 opencv/*:with_eigen=False
 xkbcommon/*:with_x11=False
-ffmpeg/*:with_pulse=False
+ffmpeg/*:with_asm=False
 ffmpeg/*:with_xcb=False
 ffmpeg/*:with_xlib=False
 ffmpeg/*:with_vaapi=False
 ffmpeg/*:with_vdpau=False
 ffmpeg/*:with_libalsa=False
+ffmpeg/*:with_pulse=False
 */*:shared=False
 libx265/*:assembly=False
 
