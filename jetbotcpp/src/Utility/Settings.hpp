@@ -5,6 +5,7 @@
 #include <string>
 #include <unistd.h>
 #include <fstream>
+#include "Logging.hpp"
 
 namespace Utility {
 namespace fs = std::filesystem;
@@ -23,12 +24,10 @@ public:
     if (len != -1) {
       path[len] = '\0';
       resource_dir = fs::path(path).parent_path().string();
-      std::cout << "Ресурсы ищем в: " << resource_dir << std::endl;
+      logMsg(std::format("Ресурсы ищем в: {}", resource_dir));
     } else {
       resource_dir = ".";
-      std::cout << "Не удалось определить путь к исполняемому файлу, "
-                   "используем текущую директорию"
-                << std::endl;
+      logMsg("Не удалось определить путь к исполняемому файлу, используем текущую директорию");
     }
     return resource_dir;
   };

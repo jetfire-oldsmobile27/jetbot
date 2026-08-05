@@ -6,15 +6,14 @@
 #include <opencv2/objdetect.hpp>
 #include <opencv2/videoio.hpp>
 #include <fstream>
-
+#include "Logging.hpp"
 
 namespace Startup {
 
 class StartupManager {
 public:
-
-   // @todo Maybe width&height in init?
-  StartupManager(int width, int height)
+// @todo Maybe width&height in init?  
+StartupManager(int width, int height)
       : width_(width), height_(height), center_x_(width / 2),
         center_y_(height / 2), circle_radius_(30), circle_distance_(120),
         animation_phase_(0), start_time_(std::chrono::steady_clock::now()),
@@ -175,7 +174,7 @@ public:
     return anim_frame;
   }
 
-bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps, int width, int height, cv::Mat& frame) {
+  bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps, int width, int height, cv::Mat& frame) {
     const int MAX_CAMERAS = 10;
     std::vector<int> indices;
     
@@ -187,7 +186,7 @@ bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps,
     }
 
     for (int idx : indices) {
-        std::cout << "Попытка открыть камеру с индексом: " << idx << std::endl;
+        logMsg(std::format("Попытка открыть камеру с индексом: {}", idx));
         cap.open(idx, cv::CAP_V4L);
         if (cap.isOpened()) {
             cap.set(cv::CAP_PROP_FRAME_WIDTH, width);
@@ -197,20 +196,20 @@ bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps,
             cv::Mat test_frame;
             if (cap.read(test_frame)) {
                 cv::resize(test_frame, frame, cv::Size(width, height));
-                std::cout << "Камера успешно открыта с индексом: " << idx << std::endl;
+                logMsg(std::format("Камера успешно открыта с индексом: {}", idx));
                 return true;
             } else {
-                std::cerr << "Камера с индексом " << idx << " открыта, но не удалось получить кадр." << std::endl;
+                logMsg(std::format("Камера с индексом {} открыта, но не удалось получить кадр.", idx));
                 cap.release();
             }
         } else {
-            std::cerr << "Не удалось открыть камеру с индексом: " << idx << std::endl;
+            logMsg(std::format("Не удалось открыть камеру с индексом: {}", idx));
         }
     }
     
-    std::cerr << "Не удалось открыть ни одну камеру." << std::endl;
+    logMsg("Не удалось открыть ни одну камеру.");
     return false;
-}
+  }
 
   void initialize(const std::string& resource_dir, const int camera_index, const int fps) {
     // Шаг 1: Загрузка классов
@@ -224,10 +223,9 @@ bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps,
       }
       class_file.close();
       initialization_progress_ = 0.1f;
-      std::cout << "Классы загружены из: " << classes_path << std::endl;
+      logMsg(std::format("Классы загружены из: {}", classes_path));
     } else {
-      std::cerr << "Не удалось загрузить классы из: " << classes_path
-                << std::endl;
+      logMsg(std::format("Не удалось загрузить классы из: {}", classes_path));
       classes_ = {"person"}; // Минимальный набор
     }
 
@@ -238,17 +236,15 @@ bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps,
       std::string weights_path = resource_dir + "/yolov3-tiny.weights";
       std::string cfg_path = resource_dir + "/yolov3-tiny.cfg";
 
-      std::cout << "Попытка загрузить YOLO из: " << weights_path << " и "
-                << cfg_path << std::endl;
+      logMsg(std::format("Попытка загрузить YOLO из: {} и {}", weights_path, cfg_path));
 
       // Проверяем существование файлов
       if (!std::filesystem::exists(weights_path)) {
-        std::cerr << "Файл весов не найден: " << weights_path << std::endl;
+        logMsg(std::format("Файл весов не найден: {}", weights_path));
         throw std::runtime_error("Weights file not found");
       }
       if (!std::filesystem::exists(cfg_path)) {
-        std::cerr << "Конфигурационный файл не найден: " << cfg_path
-                  << std::endl;
+        logMsg(std::format("Конфигурационный файл не найден: {}", cfg_path));
         throw std::runtime_error("Config file not found");
       }
 
@@ -257,7 +253,7 @@ bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps,
       // ВСЕГДА ИСПОЛЬЗУЕМ CPU
       net_.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
       net_.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
-      std::cout << "Используется CPU (CUDA отключена)" << std::endl;
+      logMsg("Используется CPU (CUDA отключена)");
 
       // Получаем имена выходных слоев
       std::vector<cv::String> layer_names = net_.getLayerNames();
@@ -267,9 +263,9 @@ bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps,
 
       initialization_progress_ = 0.6f;
     } catch (const cv::Exception &e) {
-      std::cerr << "Не удалось загрузить YOLO: " << e.what() << std::endl;
+      logMsg(std::format("Не удалось загрузить YOLO: {}", e.what()));
     } catch (...) {
-      std::cerr << "Не удалось загрузить YOLO: неизвестная ошибка" << std::endl;
+      logMsg("Не удалось загрузить YOLO: неизвестная ошибка");
     }
 
     // Шаг 3: Загрузка каскада для лиц
@@ -287,17 +283,15 @@ bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps,
     for (const auto &path : cascade_paths) {
       if (std::filesystem::exists(path) && face_cascade_.load(path)) {
         cascade_loaded = true;
-        std::cout << "Детектор лиц загружен из: " << path << std::endl;
+        logMsg(std::format("Детектор лиц загружен из: {}", path));
         break;
       } else if (std::filesystem::exists(path)) {
-        std::cout << "Файл каскада найден, но не загружен: " << path
-                  << std::endl;
+        logMsg(std::format("Файл каскада найден, но не загружен: {}", path));
       }
     }
 
     if (!cascade_loaded) {
-      std::cerr << "Не удалось загрузить детектор лиц ни из одного пути"
-                << std::endl;
+      logMsg("Не удалось загрузить детектор лиц ни из одного пути");
     } else {
       initialization_progress_ = 0.8f;
     }
@@ -306,7 +300,7 @@ bool openCameraWithFallback(cv::VideoCapture& cap, int preferred_index, int fps,
     loading_text_ = "CONNECTING CAMERA";
     if (openCameraWithFallback(cap_, camera_index, fps, width_, height_, frame_)) {
     } else {
-        std::cerr << "Камера не открыта. Программа продолжит работу без видеопотока." << std::endl;
+      logMsg("Камера не открыта. Программа продолжит работу без видеопотока.");
     }
 
     initialization_progress_ = 1.0f;
@@ -359,4 +353,4 @@ private:
   cv::CascadeClassifier face_cascade_;
 };
 
-}; // namespace Startup
+} // namespace Startup

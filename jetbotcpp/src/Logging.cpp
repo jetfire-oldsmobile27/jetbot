@@ -19,6 +19,7 @@ void logMsg(const std::string &msg) {
   std::ofstream ofs(logPath, std::ios::app);
   auto now = std::chrono::system_clock::now();
   auto t = std::chrono::system_clock::to_time_t(now);
+  std::cout << msg << std::endl;
   ofs << std::put_time(std::localtime(&t), "%Y-%m-%d %H:%M:%S") << " — " << msg
       << "\n";
 }

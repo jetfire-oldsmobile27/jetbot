@@ -404,32 +404,10 @@ void vk_bot_thread(Utility::Settings& settings,
         status += "Люди в кадре: " + std::string(detection_active.load() ? "⚠️ обнаружены" : "✅ не обнаружены") + "\n";
         status += "Уведомления: "  + std::string(alert_enabled.load()    ? "🔔 включены" : "🔕 выключены") + "\n";
         status += "Авторизован: ID " + std::to_string(authorizedUserId.load());
-        sendVkMessage(bot, peer_id, status);
-    };
 
-    commands["cpuinfo"] = [&](Bot& bot, int64_t peer_id, const std::string&) {
-        auto info = readFile("/proc/cpuinfo");
-        if (info.empty()) {
-            sendVkMessage(bot, peer_id, "❌ Не удалось прочитать /proc/cpuinfo");
-        } else if (info.size() < 3500) {
-            sendVkMessage(bot, peer_id, info);
-        } else {
-            std::string tmp = "/tmp/cpuinfo.txt";
-            std::ofstream(tmp) << info;
-            sendVkDocument(bot, peer_id, tmp, "text/plain");
-            std::filesystem::remove(tmp);
-        }
-    };
-
-    commands["temp"] = [&](Bot& bot, int64_t peer_id, const std::string&) {
-        try {
-            Json empty;
-            bot.send_request(Bot::Method::MarkAsRead, empty);
-        } catch(...) {
-            logMsg("❌ Не удалось поставить статус \"Прочитано\" ");
-        }
         std::ostringstream report;
-        bool found = false;
+        bool found = false;\
+
         const std::filesystem::path thermalDir{"/sys/class/thermal"};
         if (std::filesystem::exists(thermalDir) && std::filesystem::is_directory(thermalDir)) {
             for (auto& entry : std::filesystem::directory_iterator(thermalDir)) {
@@ -481,10 +459,27 @@ void vk_bot_thread(Utility::Settings& settings,
                 }
             }
         }
-        if (!found)
-            sendVkMessage(bot, peer_id, "❌ Не найден ни один температурный датчик.");
-        else
-            sendVkMessage(bot, peer_id, report.str());
+        if (!found) {
+                status += "\n❌ Не найден ни один температурный датчик.\n";
+            } else {
+            status += "Температуры:\n" + report.str();
+        }
+
+        sendVkMessage(bot, peer_id, status);
+    };
+
+    commands["cpuinfo"] = [&](Bot& bot, int64_t peer_id, const std::string&) {
+        auto info = readFile("/proc/cpuinfo");
+        if (info.empty()) {
+            sendVkMessage(bot, peer_id, "❌ Не удалось прочитать /proc/cpuinfo");
+        } else if (info.size() < 3500) {
+            sendVkMessage(bot, peer_id, info);
+        } else {
+            std::string tmp = "/tmp/cpuinfo.txt";
+            std::ofstream(tmp) << info;
+            sendVkDocument(bot, peer_id, tmp, "text/plain");
+            std::filesystem::remove(tmp);
+        }
     };
 
     commands["logs"] = [&](Bot& bot, int64_t peer_id, const std::string&) {
@@ -627,5 +622,5 @@ void vk_bot_thread(Utility::Settings& settings,
             std::this_thread::sleep_for(std::chrono::seconds(3));
         }
     }
-    std::cout << "VK thread finished\n";
+    logMsg("VK Thread завершен\n");
 }

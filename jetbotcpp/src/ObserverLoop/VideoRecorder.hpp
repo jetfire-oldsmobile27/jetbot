@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <sstream>
 #include <filesystem>
+#include "Logging.hpp"
 
 namespace ObserverLoop {
 
@@ -55,8 +56,7 @@ private:
         for (const auto& [codec_name, fourcc_val] : codecs_to_try) {
             writer_.open(current_video_path_, fourcc_val, 25.0, frame_size);
             if (writer_.isOpened()) {
-                std::cout << "✅ Кодек " << codec_name << " успешно открыт для записи: " 
-                          << current_video_path_ << std::endl;
+                logMsg(std::format("✅ Кодек {} успешно открыт для записи:  {}", codec_name, current_video_path_));
                 use_mjpg_ = (codec_name == "MJPG");
                 return true;
             }
@@ -65,12 +65,10 @@ private:
         // Если ни один кодек не сработал, пробуем без указания кодека
         writer_.open(current_video_path_, cv::CAP_ANY, 25.0, frame_size);
         if (writer_.isOpened()) {
-            std::cout << "⚠️  Запись открыта с кодеком по умолчанию: " 
-                      << current_video_path_ << std::endl;
+            logMsg(std::format("⚠️  Запись открыта с кодеком по умолчанию:  {}", current_video_path_));
             return true;
         }
-        
-        std::cerr << "❌ Не удалось открыть VideoWriter ни с одним кодеком!" << std::endl;
+        logMsg("❌ Не удалось открыть VideoWriter ни с одним кодеком!");
         return false;
     }
 
@@ -105,7 +103,7 @@ public:
         }
         
         segment_start_time_ = std::chrono::steady_clock::now();
-        std::cout << "🎥 Начата запись: " << current_video_path_ << std::endl;
+        logMsg(std::format("🎥 Начата запись: {}", current_video_path_));
     }
 
     void writeFrame(const cv::Mat &frame) {
@@ -133,9 +131,7 @@ public:
             // Закрываем текущий файл и начинаем новый
             std::string old_path = current_video_path_;
             writer_.release();
-            
-            std::cout << "🔄 Завершен сегмент: " << old_path 
-                      << " (длительность: " << elapsed << "сек)" << std::endl;
+            logMsg(std::format("🔄 Завершен сегмент: {} (длительность: {}сек)", old_path, elapsed));
             
             startRecording(frame_size_);
         }
@@ -145,7 +141,7 @@ public:
         std::lock_guard<std::mutex> lock(video_mutex);
         if (writer_.isOpened()) {
             writer_.release();
-            std::cout << "⏹️  Запись завершена: " << current_video_path_ << std::endl;
+            logMsg(std::format("⏹️  Запись завершена: {}", current_video_path_));
         }
     }
 

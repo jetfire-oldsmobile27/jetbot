@@ -58,7 +58,7 @@ extern const std::string OLLAMA_IP;
 struct FrameBuffer {
     static constexpr int MAX_FRAMES = 8;
     std::deque<std::pair<cv::Mat, double>> frames; // кадр + timestamp
-    std::mutex mtx;
+    mutable std::mutex mtx;
     void push(const cv::Mat& frame, double time) {
         std::lock_guard lock(mtx);
         frames.push_back({frame.clone(), time});
