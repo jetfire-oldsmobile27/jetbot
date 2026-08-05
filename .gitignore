@@ -7,3 +7,4 @@ bot.log
 sysroots
 bin
 .cache
+build-arm64

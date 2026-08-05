@@ -2,6 +2,9 @@
 #include <atomic>
 #include <string>
 #include <opencv2/core.hpp>
+#include <deque>
+#include <vector>
+#include <mutex>
 #include "Version.hpp"
 
 // Флаги конфигурации (доступны из командной строки)
@@ -50,3 +53,21 @@ const float NMS_THRESHOLD = 0.4f;
 const int RECORDING_DURATION = 60;
 const int INITIAL_RECORDING_DURATION = 60;
 extern const std::string OLLAMA_IP;
+
+
+struct FrameBuffer {
+    static constexpr int MAX_FRAMES = 8;
+    std::deque<std::pair<cv::Mat, double>> frames; // кадр + timestamp
+    std::mutex mtx;
+    void push(const cv::Mat& frame, double time) {
+        std::lock_guard lock(mtx);
+        frames.push_back({frame.clone(), time});
+        if (frames.size() > MAX_FRAMES) frames.pop_front();
+    }
+    std::vector<cv::Mat> getFrames() const {
+        std::lock_guard lock(mtx);
+        std::vector<cv::Mat> out;
+        for (auto& p : frames) out.push_back(p.first.clone());
+        return out;
+    }
+};

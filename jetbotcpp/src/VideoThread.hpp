@@ -85,6 +85,9 @@ void video_processing_thread(TgBot::Bot* bot,
   auto system_start_time = start_time;
 
   auto last_frame_time = std::chrono::steady_clock::now();
+
+  FrameBuffer buffer;
+
   while (running) {
     auto now = std::chrono::steady_clock::now();
 
@@ -111,6 +114,7 @@ void video_processing_thread(TgBot::Bot* bot,
       cap.release();
       continue;
     }
+    
     last_frame_time = now;
 
     {
@@ -147,6 +151,8 @@ void video_processing_thread(TgBot::Bot* bot,
         std::chrono::duration<double>(loop_start - start_time).count();
     double system_uptime =
         std::chrono::duration<double>(loop_start - system_start_time).count();
+
+    buffer.push(frame, current_time);
 
     cv::Mat small_frame, display_frame;
     cv::resize(frame, small_frame, cv::Size(640, 480));
