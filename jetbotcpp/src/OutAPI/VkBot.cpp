@@ -403,7 +403,7 @@ void vk_bot_thread(Utility::Settings& settings,
         status += "Очистка: "   + std::string(flag_cleanup.load()   ? "✅ активна" : "❌ отключена") + "\n";
         status += "Люди в кадре: " + std::string(detection_active.load() ? "⚠️ обнаружены" : "✅ не обнаружены") + "\n";
         status += "Уведомления: "  + std::string(alert_enabled.load()    ? "🔔 включены" : "🔕 выключены") + "\n";
-        status += "Авторизован: ID " + std::to_string(authorizedUserId.load());
+        status += "Авторизован: ID " + std::to_string(authorizedUserId.load()) + "\n";
 
         std::ostringstream report;
         bool found = false;\
