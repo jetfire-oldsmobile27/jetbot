@@ -4,6 +4,7 @@ project(telegram_camera_bot LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH ON ) # added
 
 file(READ "version.txt" ver)
 string(REGEX MATCH "VERSION_MAJOR ([0-9]+)" _ ${ver})
@@ -100,14 +101,14 @@ else()
         nlohmann_json::nlohmann_json
     )
 
-    add_executable(test-vk test-vk.cpp)
-    target_link_libraries(test-vk PRIVATE
-        vkbot::vkbot
-        Boost::filesystem
-        nlohmann_json::nlohmann_json
-        #CURL::libcurl
-    )
-    target_include_directories(test-vk PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    # add_executable(test-vk test-vk.cpp)
+    # target_link_libraries(test-vk PRIVATE
+    #     vkbot::vkbot
+    #     Boost::filesystem
+    #     nlohmann_json::nlohmann_json
+    #     #CURL::libcurl
+    # )
+    # target_include_directories(test-vk PRIVATE ${CMAKE_SOURCE_DIR}/src)
     #target_compile_options(test-vk PRIVATE -fsanitize=address -g)
     #target_link_options(test-vk PRIVATE -fsanitize=address)
 endif()
