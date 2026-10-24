@@ -27,7 +27,7 @@ constexpr std::chrono::seconds REQUEST_TIMEOUT{10};
 auto sendGetRequest(const std::string& target) -> std::expected<void, RequestError> {
   if (LOCAL_MACHINE_IP.empty() || LOCAL_MACHINE_PORT.empty()) {
     logMsg("LocalMachinesHttpAPI: LOCAL_MACHINE_IP/LOCAL_MACHINE_PORT не заданы");
-    return std::unexpected(RequestError::NO_ADDRESS);
+    return std::unexpected(RequestError::ADDRESS_NOT_SET);
   }
 
   try {

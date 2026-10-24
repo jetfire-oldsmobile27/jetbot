@@ -5,7 +5,7 @@ namespace LocalMachinesHttpAPI {
 
 enum class RequestError {
   SUCCESS = 0,
-  NO_ADDRESS,    
+  ADDRESS_NOT_SET,    
   BAD_CONNECTION,  
   BAD_RESPONSE,    
   TIMEOUT,         

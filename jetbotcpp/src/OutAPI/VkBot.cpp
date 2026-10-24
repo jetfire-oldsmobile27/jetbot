@@ -501,7 +501,7 @@ void vk_bot_thread(Utility::Settings& settings,
                               LocalMachinesHttpAPI::RequestError err,
                               const std::string& ok_msg) {
     switch (err) {
-        case LocalMachinesHttpAPI::RequestError::NO_ADDRESS:
+        case LocalMachinesHttpAPI::RequestError::ADDRESS_NOT_SET:
             sendVkMessage(bot, peer_id,
                 "❌ Не задан адрес локальной машины "
                 "(LOCAL_MACHINE_IP/LOCAL_MACHINE_PORT)");
