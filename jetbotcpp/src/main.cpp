@@ -83,6 +83,16 @@ const std::string OLLAMA_IP = []() -> std::string {
   return env ? env : "";
 }();
 
+const std::string LOCAL_MACHINE_IP = []() -> std::string {
+  const char *env = std::getenv("LOCAL_MACHINE_IP");
+  return env ? env : "";
+}();
+
+const std::string LOCAL_MACHINE_PORT = []() -> std::string {
+  const char *env = std::getenv("LOCAL_MACHINE_PORT");
+  return env ? env : "";
+}();
+
 void signalHandler(int) { running = false; }
 
 int main(int argc, char *argv[]) {

@@ -1,31 +1,20 @@
+#include "core_esp8266_features.h"
+#include "pins_arduino.h"
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
-#include <IRremoteESP8266.h>
-#include <IRrecv.h>
-#include <IRsend.h>
-#include <IRutils.h> 
 #include <ArduinoJson.h>
+#include <cstdint>
 
-const char* ssid = "Ne_vlezay_ubjet"; 
+const char* ssid = "JetLegacy_Bus"; 
 const char* password = "50504022"; 
+const char* wifi_client_name = "ESP-ServerRemoteMotherboardCtl";
+constexpr int led_pin = D4;
 
-const uint16_t kRecvPin = 4; 
-const uint16_t kIrLed = 5;   
-
-IRrecv irrecv(kRecvPin);
-IRsend irsend(kIrLed);
-decode_results results; // Хранит результаты последнего декодированного сигнала
 
 // --- Веб-сервер ---
-ESP8266WebServer server(80);
+ESP8266WebServer server(8083);
 
-// --- Переменная для хранения последнего сигнала ---
-// Используем структуру, которая может хранить сырые данные о сигнале
-#define SIGNAL_BUFFER_SIZE 1024 // Размер буфера для хранения сигнала (может потребоваться увеличить)
-uint16_t signalBuffer[SIGNAL_BUFFER_SIZE];
-uint16_t signalLength = 0;
-bool signalReceived = false;
 
 // --- Функции обработчики эндпоинтов ---
 
@@ -36,47 +25,6 @@ void handleRoot() {
   html += "<p><a href='/signal-info'>/signal-info</a> - Get information about the last recorded IR signal</p>";
   html += "</body></html>";
   server.send(200, "text/html", html);
-}
-
-void handleSignal() {
-    if (!signalReceived) {
-        server.send(404, "text/plain", "No signal recorded yet");
-        return;
-    }
-
-    Serial.println("Sending recorded IR signal...");
-    irsend.sendRaw(signalBuffer, signalLength, 38); // 38 kHz 
-    delay(100);
-
-    server.send(200, "text/plain", "IR signal sent");
-}
-
-void handleSignalInfo() {
-    if (!signalReceived) {
-        server.send(404, "text/plain", "No signal recorded yet");
-        return;
-    }
-
-    const size_t capacity = JSON_OBJECT_SIZE(5) + 1024; 
-    DynamicJsonDocument doc(capacity);
-
-    doc["protocol"] = typeToString(results.decode_type);
-    doc["bits"] = results.bits;
-    doc["value"] = String(results.value, HEX); 
-    doc["address"] = String(results.address, HEX); 
-    doc["command"] = String(results.command, HEX); 
-
-    JsonArray rawData = doc.createNestedArray("raw_data");
-    for (uint16_t i = 0; i < signalLength && i < SIGNAL_BUFFER_SIZE; i++) {
-        rawData.add(signalBuffer[i]);
-    }
-
-    doc["raw_length"] = signalLength;
-
-    String jsonString;
-    serializeJson(doc, jsonString);
-
-    server.send(200, "application/json", jsonString);
 }
 
 void handleNotFound() {
@@ -115,14 +63,28 @@ void handlePing() {
   }
 }
 
+void handlePushPowerButton(const uint16_t& milliseconds_when_push) {
+  digitalWrite(D2, HIGH);
+  delay(milliseconds_when_push);
+  digitalWrite(D2, LOW);
+  server.send(200, "text/plain", "Done");
+};
+
+
+void pushShortlyPowerButton() {
+  handlePushPowerButton(700);
+}
+
+void pushLongPowerButton() {
+  handlePushPowerButton(6000);
+}
+
 void setup() {
+  delay(800); // waiting for flash
   Serial.begin(115200);
   Serial.println("\nStarting IR Signal Controller...");
-
-  irsend.begin();
-
-  irrecv.enableIRIn();
-
+  
+  WiFi.setHostname(wifi_client_name);
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
@@ -133,10 +95,22 @@ void setup() {
   Serial.print("Connected, IP address: ");
   Serial.println(WiFi.localIP());
 
+
+  pinMode(led_pin, OUTPUT);
+  // Blink when ready
+  for(int i = 0; i < 3; ++i){
+    digitalWrite(led_pin, LOW);
+    delay(700);
+    digitalWrite(led_pin, HIGH);
+    delay(400);
+  };
+
+  pinMode(D2, OUTPUT);
+
   server.on("/", HTTP_GET, handleRoot);
-  server.on("/signal", HTTP_GET, handleSignal);
   server.on("/ping", HTTP_GET, handlePing);
-  server.on("/signal-info", HTTP_GET, handleSignalInfo);
+  server.on("/push-power-button", HTTP_GET, pushShortlyPowerButton);
+  server.on("/turn-off-pc-immidiatelly", HTTP_GET, pushLongPowerButton);
   server.onNotFound(handleNotFound);
 
   server.begin();
@@ -144,30 +118,6 @@ void setup() {
 
 void loop() {
   server.handleClient();
-
-  if (irrecv.decode(&results)) {
-    /*Serial.println("IR signal received:");
-    Serial.print("Protocol: ");
-    Serial.println(typeToString(results.decode_type));
-    Serial.print("Bits: ");
-    Serial.println(results.bits);
-    Serial.print("Value: ");
-    Serial.println(results.value, HEX);*/
-
-    signalLength = results.rawlen - 1; 
-    if (signalLength > SIGNAL_BUFFER_SIZE) {
-        signalLength = SIGNAL_BUFFER_SIZE;
-    }
-    for (uint16_t i = 0; i < signalLength; i++) {
-        signalBuffer[i] = results.rawbuf[i + 1]; 
-        // Serial.print(signalBuffer[i]); Serial.print(" ");
-    }
-    // Serial.println();
-
-    signalReceived = true;
-
-    irrecv.resume(); 
-  }
 
   yield();
 }

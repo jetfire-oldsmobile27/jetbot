@@ -54,6 +54,10 @@ const int RECORDING_DURATION = 60;
 const int INITIAL_RECORDING_DURATION = 60;
 extern const std::string OLLAMA_IP;
 
+// Параметры локальной машины управления питанием
+extern const std::string LOCAL_MACHINE_IP;
+extern const std::string LOCAL_MACHINE_PORT;
+
 
 struct FrameBuffer {
     static constexpr int MAX_FRAMES = 8;

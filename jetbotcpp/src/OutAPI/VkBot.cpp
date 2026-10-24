@@ -15,6 +15,7 @@
 #include "ObserverLoop/VideoRecorder.hpp"
 #include "OllamaServer.hpp"
 #include "Utility/Settings.hpp"
+#include "OutAPI/LocalMachinesHttpAPI.hpp"
 
 
 static int64_t generate_random_id() {
@@ -207,6 +208,10 @@ static Json createMainMenuKeyboard() {
         Json::array({
             Json{{"action", Json{{"type","text"},{"payload","{\"command\":\"status\"}"},{"label","📊 Статус"}}},      {"color","secondary"}},
             Json{{"action", Json{{"type","text"},{"payload","{\"command\":\"alert\"}"},{"label","🔔 Уведомления"}}},  {"color","secondary"}}
+        }),
+        Json::array({
+            Json{{"action", Json{{"type","text"},{"payload","{\"command\":\"power\"}"},{"label","⚡ Вкл/выкл ПК"}}},   {"color","negative"}},
+            Json{{"action", Json{{"type","text"},{"payload","{\"command\":\"hardoff\"}"},{"label","🔌 Выкл. ПК"}}},   {"color","negative"}}
         })
     });
     return keyboard;
@@ -491,6 +496,51 @@ void vk_bot_thread(Utility::Settings& settings,
     };
 
     commands["notify"] = commands["alert"];
+
+    auto respondRequestError = [](Bot& bot, int64_t peer_id,
+                              LocalMachinesHttpAPI::RequestError err,
+                              const std::string& ok_msg) {
+    switch (err) {
+        case LocalMachinesHttpAPI::RequestError::NO_ADDRESS:
+            sendVkMessage(bot, peer_id,
+                "❌ Не задан адрес локальной машины "
+                "(LOCAL_MACHINE_IP/LOCAL_MACHINE_PORT)");
+            break;
+        case LocalMachinesHttpAPI::RequestError::BAD_CONNECTION:
+            sendVkMessage(bot, peer_id,
+                "❌ Не удалось соединиться с локальной машиной");
+            break;
+        case LocalMachinesHttpAPI::RequestError::BAD_RESPONSE:
+            sendVkMessage(bot, peer_id,
+                "❌ Сервер вернул код, отличный от 200");
+            break;
+        case LocalMachinesHttpAPI::RequestError::TIMEOUT:
+            sendVkMessage(bot, peer_id,
+                "❌ Таймаут запроса (10 сек)");
+            break;
+        default:
+            sendVkMessage(bot, peer_id, "❌ Неизвестная ошибка");
+            break;
+    }
+};
+
+commands["power"] = [&](Bot& bot, int64_t peer_id, const std::string&) {
+    logMsg("VK: /power от ID " + std::to_string(peer_id));
+    auto result = LocalMachinesHttpAPI::pushPowerButton();
+    if (result.has_value())
+        sendVkMessage(bot, peer_id, "⚡ Команда \"кнопка питания\" отправлена");
+    else
+        respondRequestError(bot, peer_id, result.error(), "");
+};
+
+commands["hardoff"] = [&](Bot& bot, int64_t peer_id, const std::string&) {
+    logMsg("VK: /hardoff от ID " + std::to_string(peer_id));
+    auto result = LocalMachinesHttpAPI::turnOffPcImmediately();
+    if (result.has_value())
+        sendVkMessage(bot, peer_id, "🔌 Команда принудительного выключения отправлена");
+    else
+        respondRequestError(bot, peer_id, result.error(), "");
+};
 
     // ---------- Основной цикл ----------
     while (running) {
