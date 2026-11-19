@@ -7,12 +7,12 @@
 
 // Forward declarations
 namespace Utility      { class Settings;      }
-namespace ObserverLoop { class VideoRecorder; }
+namespace ObserverLoop::Recording { class RecordingManager; }
 namespace vk::bot      { class BotBase;       } 
 
 using CommandHandler =
     std::function<void(vk::bot::BotBase&, int64_t, const std::string&)>;
 
 void vk_bot_thread(Utility::Settings& settings,
-                   ObserverLoop::VideoRecorder& recorder,
+                   ObserverLoop::Recording::RecordingManager& recorder,
                     vk::bot::BotBase& bot_vk);

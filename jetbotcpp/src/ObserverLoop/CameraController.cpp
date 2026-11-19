@@ -8,23 +8,4 @@ CameraController::CameraController() {
 CameraController::~CameraController() {
 
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 }

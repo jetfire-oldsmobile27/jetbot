@@ -19,13 +19,13 @@ string(TIMESTAMP BUILD_TIME "%Y-%m-%d %H:%M:%S" UTC)
 message("Version: ${APP_VERSION} Builded time UTC: ${BUILD_TIME}")
 configure_file(src/Version.hpp.in Version.hpp)
 
-
 file(GLOB_RECURSE PROJECT_SOURCES
     ${CMAKE_SOURCE_DIR}/src/Utility/*.cpp
-    ${CMAKE_SOURCE_DIR}/src/Utility/Debug-server/*.cpp
+    ${CMAKE_SOURCE_DIR}/src/Utility/Debug-server/*.cpp  
     ${CMAKE_SOURCE_DIR}/src/Utility/thirdparty/*.cpp  
     ${CMAKE_SOURCE_DIR}/src/ObserverLoop/*.cpp
     ${CMAKE_SOURCE_DIR}/src/ObserverLoop/Detection/*.cpp
+    ${CMAKE_SOURCE_DIR}/src/ObserverLoop/Recording/*.cpp
     ${CMAKE_SOURCE_DIR}/src/Startup/*.cpp
     ${CMAKE_SOURCE_DIR}/src/Tests/*.cpp
     ${CMAKE_SOURCE_DIR}/src/OutAPI/*.cpp
@@ -44,6 +44,18 @@ endfunction()
 
 find_package(OpenCV REQUIRED)
 message(STATUS "OpenCV LIBS = ${OpenCV_LIBS}")
+
+# Запись видео идёт напрямую через GStreamer (v4l2src/alsasrc/splitmuxsink),
+# поэтому нужны заголовки и библиотеки ядра, app и video.
+# Для кросс-сборки pkg-config должен смотреть в sysroot целевой системы.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET
+    gstreamer-1.0>=1.18
+    gstreamer-app-1.0
+    gstreamer-video-1.0
+)
+message(STATUS "GStreamer include dirs = ${GSTREAMER_INCLUDE_DIRS}")
+
 find_package(indicators REQUIRED)
 find_package(onnxruntime REQUIRED)
 
@@ -72,6 +84,7 @@ if(ON_SBC)
         boost_container
         ${CURL_LIBRARIES}
         ${OpenCV_LIBS}
+        PkgConfig::GSTREAMER
         indicators::indicators
         onnxruntime::onnxruntime
     )
@@ -91,9 +104,10 @@ else()
     target_link_libraries(${PROJECT_NAME} PRIVATE
         tgbot::tgbot
         ${OpenCV_LIBS}
+        PkgConfig::GSTREAMER
         Boost::boost
         Boost::system
-        Boost::filesystem   # was missing for this target
+        Boost::filesystem   
         indicators::indicators
         -static-libstdc++
         onnxruntime::onnxruntime
@@ -137,7 +151,7 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 4.2)
     else()
         message(FATAL_ERROR "Icon file not found: ${CMAKE_SOURCE_DIR}/src/assets/telegram_camera_bot.png")
     endif()
-
+    
     set(DESKTOP_FILE "${CMAKE_BINARY_DIR}/${PROJECT_NAME}.desktop")
     file(WRITE ${DESKTOP_FILE}
         "[Desktop Entry]\n"
@@ -159,20 +173,19 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 4.2)
             EXECUTABLES $<TARGET_FILE:telegram_camera_bot>
             RESOLVED_DEPENDENCIES_VAR resolved_deps
         )
-
+        
         foreach(dep ${resolved_deps})
             # copy the symlink
             file(COPY ${dep} DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
-
+            
             # Resolve the real path of the dependency (follows symlinks)
             file(REAL_PATH ${dep} resolved_dep_path)
-
+            
             # Copy the resolved file to the destination
             file(COPY ${resolved_dep_path} DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
         endforeach()
     ]])
 
-    
     # Настройка CPack
     set(CPACK_GENERATOR "AppImage")
     set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")

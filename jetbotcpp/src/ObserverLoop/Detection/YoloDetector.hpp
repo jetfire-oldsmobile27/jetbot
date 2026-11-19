@@ -36,4 +36,3 @@ private:
   std::unique_ptr<Impl> pImpl_;
 };
 } // namespace ObserverLoop::Detection
-

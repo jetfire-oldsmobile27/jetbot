@@ -40,16 +40,61 @@ void cleanupOldVideos() {
     auto now = std::chrono::system_clock::now();
     auto thirty_days_ago = now - std::chrono::hours(24 * 30);
 
+    const auto to_system_time = [](std::filesystem::file_time_type ftime) {
+      return std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+          ftime - decltype(ftime)::clock::now() +
+          std::chrono::system_clock::now());
+    };
+
     for (const auto &entry : std::filesystem::directory_iterator(video_dir)) {
-      if (entry.path().extension() == ".mp4") {
-        auto ftime = std::filesystem::last_write_time(entry);
+      std::error_code type_ec;
+      const std::string name = entry.path().filename().string();
 
-        auto sctp =
-            std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-                ftime - decltype(ftime)::clock::now() +
-                std::chrono::system_clock::now());
+      // Текущий формат записи: каталог сессии session_<дата>_<время>_<pid>
+      // с сегментами camera_*.mkv и processed_*.mkv внутри.
+      if (entry.is_directory(type_ec) && name.rfind("session_", 0) == 0) {
+        std::filesystem::file_time_type newest{};
+        bool have_newest = false;
+        std::error_code walk_ec;
+        for (const auto &file :
+             std::filesystem::directory_iterator(entry.path(), walk_ec)) {
+          if (walk_ec)
+            break;
+          std::error_code file_ec;
+          if (!file.is_regular_file(file_ec))
+            continue;
+          const auto write_time = file.last_write_time(file_ec);
+          if (file_ec)
+            continue;
+          if (!have_newest || write_time > newest) {
+            newest = write_time;
+            have_newest = true;
+          }
+        }
 
-        if (sctp < thirty_days_ago) {
+        const auto dir_time = have_newest
+                                  ? to_system_time(newest)
+                                  : to_system_time(
+                                        std::filesystem::last_write_time(entry));
+
+        if (dir_time < thirty_days_ago) {
+          std::error_code remove_ec;
+          std::filesystem::remove_all(entry.path(), remove_ec);
+          if (remove_ec) {
+            logMsg("Не удалось удалить старую сессию записи " +
+                   entry.path().string() + ": " + remove_ec.message());
+          } else {
+            logMsg("Удалена старая сессия записи: " + entry.path().string());
+          }
+        }
+        continue;
+      }
+
+      // Прежний формат: отдельные файлы .mp4 прямо в каталоге видео.
+      if (entry.is_regular_file(type_ec) &&
+          entry.path().extension() == ".mp4") {
+        if (to_system_time(std::filesystem::last_write_time(entry)) <
+            thirty_days_ago) {
           std::filesystem::remove(entry.path());
           logMsg("Удален старый видеофайл: " + entry.path().string());
         }

@@ -12,7 +12,7 @@
 
 #include "Globals.hpp"
 #include "Logging.hpp"
-#include "ObserverLoop/VideoRecorder.hpp"
+#include "ObserverLoop/Recording/RecordingManager.hpp"
 #include "OllamaServer.hpp"
 #include "Utility/Settings.hpp"
 #include "OutAPI/LocalMachinesHttpAPI.hpp"
@@ -219,7 +219,7 @@ static Json createMainMenuKeyboard() {
 
 
 void vk_bot_thread(Utility::Settings& settings,
-                   ObserverLoop::VideoRecorder& recorder,
+                   ObserverLoop::Recording::RecordingManager& recorder,
                    vk::bot::BotBase& bot_vk)
 {
     std::unordered_map<std::string, CommandHandler> commands;
@@ -346,34 +346,36 @@ void vk_bot_thread(Utility::Settings& settings,
         tm now_tm = *std::localtime(&now_c);
         char buf[20]; strftime(buf, sizeof(buf), "%Y%m%d", &now_tm);
         std::string today = buf;
-        std::string video_path = recorder.getVideoPathForDate(today);
 
-        if (!std::filesystem::exists(video_path) ||
-            std::filesystem::file_size(video_path) <= 48) {
-            for (int i = 1; i <= 7; ++i) {
-                auto date   = now - std::chrono::hours(24 * i);
-                time_t dc   = std::chrono::system_clock::to_time_t(date);
-                tm dtm      = *std::localtime(&dc);
-                char db[20]; strftime(db, sizeof(db), "%Y%m%d", &dtm);
-                std::string path = recorder.getVideoPathForDate(db);
-                if (std::filesystem::exists(path) &&
-                    std::filesystem::file_size(path) > 48) {
-                    video_path = path; break;
-                }
+        // Отдаём только завершённый сегмент: текущий файл splitmuxsink ещё
+        // пишется, его отправка дала бы обрезанное видео. Сначала пробуем
+        // обработанный поток (с разметкой), затем исходный.
+        auto pick_finalized = [&recorder](const std::string& day) {
+            std::string path = recorder.latestFinalizedVideo(
+                ObserverLoop::Recording::VideoStream::Processed, day);
+            if (path.empty()) {
+                path = recorder.latestFinalizedVideo(
+                    ObserverLoop::Recording::VideoStream::Camera, day);
             }
+            return path;
+        };
+
+        std::string video_path = pick_finalized(today);
+
+        for (int i = 1; i <= 7 && video_path.empty(); ++i) {
+            auto date   = now - std::chrono::hours(24 * i);
+            time_t dc   = std::chrono::system_clock::to_time_t(date);
+            tm dtm      = *std::localtime(&dc);
+            char db[20]; strftime(db, sizeof(db), "%Y%m%d", &dtm);
+            video_path = pick_finalized(db);
         }
 
-        if (video_path.empty() || !std::filesystem::exists(video_path) ||
-            std::filesystem::file_size(video_path) <= 48) {
-            sendVkMessage(bot, peer_id, "Нет записанных видео");
+        if (video_path.empty()) {
+            sendVkMessage(bot, peer_id, "Нет завершённых сегментов записи");
         } else {
             try {
-                if (recorder.isRecording()) {
-                    recorder.stopRecording();
-                    std::this_thread::sleep_for(std::chrono::seconds(1));
-                    recorder.startRecording();
-                }
-                sendVkDocument(bot, peer_id, video_path, "video/mp4");
+                // Запись не трогаем: файл уже закрыт splitmuxsink-ом.
+                sendVkDocument(bot, peer_id, video_path, "video/x-matroska");
             } catch (const std::exception& e) {
                 std::cerr << "Ошибка отправки видео VK: " << e.what() << '\n';
                 sendVkMessage(bot, peer_id, "❌ Ошибка отправки видео: " + std::string(e.what()));
@@ -391,7 +393,7 @@ void vk_bot_thread(Utility::Settings& settings,
             unstopable_mode = false;
             { std::lock_guard<std::mutex> lock(settings_mutex);
               settings.unstopable_mode = false; settings.save(settings_path); }
-            sendVkMessage(bot, peer_id, "🔄 Режим непрерывной записи ВЫКЛЮЧЕН");
+            sendVkMessage(bot, peer_id, "🎯 Запись по обнаружению ВКЛЮЧЕНА");
         } else {
             sendVkMessage(bot, peer_id, "Использование: /unstopable on или /unstopable off");
         }
@@ -399,8 +401,9 @@ void vk_bot_thread(Utility::Settings& settings,
 
     commands["status"] = [&](Bot& bot, int64_t peer_id, const std::string&) {
         std::string status = "📊 Статус системы:\n";
-        status += "Запись: "    + std::string(recorder.isRecording() ? "✅ активна" : "❌ неактивна") + "\n";
+        status += "Запись: "    + std::string(recorder.isRunning() ? "✅ активна" : "❌ неактивна") + "\n";
         status += "Режим: "     + std::string(unstopable_mode.load() ? "🔄 непрерывная запись" : "🎯 запись при обнаружении") + "\n";
+        status += "Микрофон: "  + std::string(recorder.audioActive() ? "✅ аудио пишется" : "❌ запись без звука") + "\n";
         status += "Детекция: "  + std::string(flag_detection.load() ? "✅ активна" : "❌ отключена") + "\n";
         status += "Лица: "      + std::string(flag_face.load()      ? "✅ активна" : "❌ отключена") + "\n";
         status += "Эффекты: "   + std::string(flag_effects.load()   ? "✅ включены": "❌ отключены") + "\n";

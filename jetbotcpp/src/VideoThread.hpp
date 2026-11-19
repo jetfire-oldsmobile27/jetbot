@@ -2,23 +2,25 @@
 #include <tgbot/Bot.h>
 
 #include <chrono>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <thread>
+#include <utility>
 
 #include "Config.hpp"
 #include "Effects.hpp"
 #include "Globals.hpp"
 #include "Logging.hpp"
 #include "ObserverLoop/Detection/YoloDetector.hpp"
-#include "ObserverLoop/VideoRecorder.hpp"
+#include "ObserverLoop/Recording/RecordingManager.hpp"
 #include "Startup/StartupManager.hpp"
 #include "Utility/Effects.hpp"
 #include "Utility/Settings.hpp"
 
 void video_processing_thread(TgBot::Bot* bot,
-                             ObserverLoop::VideoRecorder& recorder,
+                             ObserverLoop::Recording::RecordingManager& recorder,
                              Utility::Settings& settings,
                              const ConfigFlags& flags) {
   cleanupOldVideos();
@@ -33,21 +35,14 @@ void video_processing_thread(TgBot::Bot* bot,
     while (!startup_manager.isInitializationComplete() ||
            startup_manager.getAnimationPhase() < 1) {
       cv::Mat anim_frame = startup_manager.updateAnimation();
-      {
-        std::lock_guard<std::mutex> lock(frame_mutex);
-        anim_frame.copyTo(last_frame);
-      }
-
-      if (flags.recording && !recorder.isRecording()) {
-        recorder.startRecording();
-      }
 
       cv::Mat memory_dump = Utility::Effects::generateMemoryDump(WIDTH, HEIGHT);
-      cv::Mat processed_anim = flags.effects
-                                   ? applyEffects(anim_frame, memory_dump)
-                                   : anim_frame.clone();
-      if (flags.recording) {
-        recorder.writeFrame(processed_anim);
+      cv::Mat processed_anim =
+          flags.effects ? applyEffects(anim_frame, memory_dump) : anim_frame;
+
+      {
+        std::lock_guard<std::mutex> lock(frame_mutex);
+        processed_anim.copyTo(last_frame);
       }
 
       std::this_thread::sleep_for(std::chrono::milliseconds(30));
@@ -76,13 +71,38 @@ void video_processing_thread(TgBot::Bot* bot,
       std::cerr << "Failed to create YOLO detector. Detection disabled.\n";
     }
   }
-  // int frame_counter{0};
+
+  // --- Захват камеры и запись ---
+  // GStreamer-пайплайн должен быть единственным владельцем /dev/video0,
+  // поэтому OpenCV-захват, открытый StartupManager-ом, освобождается.
+  // Если запись отключена или не поднялась, остаётся прежний путь через
+  // cv::VideoCapture (фото/статус продолжают работать).
+  bool pipeline_capture = false;
+  if (flags.recording) {
+    cap.release();
+    if (recorder.start()) {
+      pipeline_capture = true;
+      std::cout << "Recording session: " << recorder.currentSessionDirectory()
+                << std::endl;
+    } else {
+      logMsg("❌ Не удалось запустить запись видео: " + recorder.lastError() +
+             ". Работаем без записи, захват через OpenCV.");
+      if (!cap.open(CAMERA_INDEX)) {
+        logMsg("❌ Камера не открылась после отката на OpenCV.");
+      }
+    }
+  }
+
   double last_dump_time{0.0};
   cv::Mat memory_dump = Utility::Effects::generateMemoryDump(WIDTH, HEIGHT);
 
   auto start_time = std::chrono::steady_clock::now();
-  double last_detection_time{0.0};
   auto system_start_time = start_time;
+  double last_detection_time{0.0};
+
+  // Состояние событийной задвижки: true - сегменты пишутся. Начинаем открытой,
+  // чтобы записать стартовое окно INITIAL_RECORDING_DURATION.
+  bool segment_gate_open = true;
 
   auto last_frame_time = std::chrono::steady_clock::now();
 
@@ -91,30 +111,48 @@ void video_processing_thread(TgBot::Bot* bot,
   while (running) {
     auto now = std::chrono::steady_clock::now();
 
-    // Траблы камеры
-    if (!cap.isOpened()) {
-      cap.open(CAMERA_INDEX);
-      if (cap.isOpened()) {
-        cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
-        cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
-        cap.set(cv::CAP_PROP_FPS, FPS);
-      } else {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        if (now - last_frame_time > std::chrono::seconds(10)) {
-          std::lock_guard<std::mutex> lk(frame_mutex);
-          last_raw_frame.release();
+    cv::Mat frame;
+    ObserverLoop::Recording::TimestampNs frame_pts = 0;
+
+    if (pipeline_capture) {
+      // Кадр приходит из GStreamer вместе с исходным PTS камеры.
+      ObserverLoop::Recording::FramePacket packet;
+      if (!recorder.readCameraFrame(packet, std::chrono::milliseconds(1000))) {
+        if (!recorder.isRunning() || !recorder.lastError().empty()) {
+          logMsg("❌ Ошибка захвата/записи: " + recorder.lastError());
+          break;
         }
+        continue; // таймаут ожидания кадра, пробуем снова
+      }
+      frame = std::move(packet.image);
+      frame_pts = packet.pts_ns;
+      if (frame.empty()) {
+        continue;
+      }
+    } else {
+      // Прежний путь: OpenCV-захват (режим без записи).
+      if (!cap.isOpened()) {
+        cap.open(CAMERA_INDEX);
+        if (cap.isOpened()) {
+          cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+          cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
+          cap.set(cv::CAP_PROP_FPS, FPS);
+        } else {
+          std::this_thread::sleep_for(std::chrono::seconds(1));
+          if (now - last_frame_time > std::chrono::seconds(10)) {
+            std::lock_guard<std::mutex> lk(frame_mutex);
+            last_raw_frame.release();
+          }
+          continue;
+        }
+      }
+
+      if (!cap.read(frame) || frame.empty()) {
+        cap.release();
         continue;
       }
     }
 
-    // Захват кадра 
-    cv::Mat frame;
-    if (!cap.read(frame) || frame.empty()) {
-      cap.release();
-      continue;
-    }
-    
     last_frame_time = now;
 
     {
@@ -122,11 +160,21 @@ void video_processing_thread(TgBot::Bot* bot,
       frame.copyTo(last_raw_frame);
     }
 
-    // Детекция YOLO 
+    auto loop_start = std::chrono::steady_clock::now();
+    double current_time =
+        std::chrono::duration<double>(loop_start - start_time).count();
+    double system_uptime =
+        std::chrono::duration<double>(loop_start - system_start_time).count();
+
+    // Детекция YOLO
     if (det_ptr_) {
       auto detection_result = det_ptr_->detect(frame);
       if (detection_result) {
         const auto& detections = *detection_result;
+        detection_active = !detections.empty();
+        if (!detections.empty()) {
+          last_detection_time = current_time;
+        }
         if (!det_ptr_->drawDetections(frame, detections)) {
           std::cerr << "Drawing failed" << std::endl;
         }
@@ -143,15 +191,31 @@ void video_processing_thread(TgBot::Bot* bot,
                                 std::to_string(static_cast<int>(error)))
                   << std::endl;
       }
+    } else {
+      detection_active = false;
+    }
+
+    // --- Политика записи: непрерывная (/unstopable on) или по обнаружению ---
+    // Камера и пайплайн работают всегда; задвижки valve решают, попадают ли
+    // кадры в muxer-ы. Так переключение мгновенное и не рвёт сегменты.
+    if (pipeline_capture) {
+      const bool always_record = unstopable_mode.load();
+      const bool should_record =
+          always_record || system_uptime <= INITIAL_RECORDING_DURATION ||
+          (current_time - last_detection_time) <= RECORDING_DURATION;
+
+      if (should_record != segment_gate_open) {
+        segment_gate_open = should_record;
+        if (!recorder.setStreamsEnabled(should_record)) {
+          logMsg("⚠️ Не удалось переключить задвижки записи");
+        }
+        logMsg(should_record
+                   ? "▶️ Запись: событие активно, сегменты пишутся"
+                   : "⏸️ Запись: событий нет, сегменты на паузе");
+      }
     }
 
     // --- Видеоэффекты
-    auto loop_start = std::chrono::steady_clock::now();
-    double current_time =
-        std::chrono::duration<double>(loop_start - start_time).count();
-    double system_uptime =
-        std::chrono::duration<double>(loop_start - system_start_time).count();
-
     buffer.push(frame, current_time);
 
     cv::Mat small_frame, display_frame;
@@ -173,66 +237,24 @@ void video_processing_thread(TgBot::Bot* bot,
     // if (flags.sound && frame_counter % 5 == 0) {
     //   Utility::Effects::playDetectSound();
     // }
-    // cv::rectangle(processed, cv::Point(WIDTH - 180, 10),
-    //               cv::Point(WIDTH - 10, 70), cv::Scalar(0, 0, 0, 200), -1);
-    // double fps =
-    //     1.0 / (std::chrono::duration<double>(loop_start - start_time).count()
-    //     +
-    //            0.001);
-    // cv::putText(processed, "TARGETS: " +
-    // std::to_string(tracked_objects.size()),
-    //             cv::Point(WIDTH - 170, 30), cv::FONT_HERSHEY_SIMPLEX, 0.6,
-    //             cv::Scalar(0, 0, 255), 1);
-    // cv::putText(processed, "FPS: " + std::to_string(static_cast<int>(fps)),
-    //             cv::Point(WIDTH - 170, 55), cv::FONT_HERSHEY_SIMPLEX, 0.5,
-    //             cv::Scalar(0, 200, 255), 1);
 
     {
       std::lock_guard<std::mutex> lock(frame_mutex);
       processed.copyTo(last_frame);
     }
 
-    // Запись видео 
-    if (flags.recording) {
-      //   if (!tracked_objects.empty()) {
-      //     last_detection_time = current_time;
-      //     detection_active = true;
-      //     if (!recorder.isRecording()) {
-      //       recorder.startRecording();
-      //       if (alert_enabled && authorizedUserId != 0) {
-      //         std::string tmp_path = "/tmp/detection_alert.jpg";
-      //         cv::imwrite(tmp_path, frame);
-      //         try {
-      //           bot->getApi().sendPhoto(
-      //               authorizedUserId,
-      //               TgBot::InputFile::fromFile(tmp_path, "image/jpeg"),
-      //               "Обнаружены люди в кадре");
-      //         } catch (...) {
-      //           logMsg("Ошибка отправки уведомления");
-      //         }
-      //         std::filesystem::remove(tmp_path);
-      //       }
-      //     }
-      //   }
-
-      if (unstopable_mode) {
-        if (!recorder.isRecording()) recorder.startRecording();
-        recorder.writeFrame(processed);
-      } else if (recorder.isRecording()) {
-        recorder.writeFrame(processed);
-        if ((current_time - last_detection_time > RECORDING_DURATION) &&
-            system_uptime > INITIAL_RECORDING_DURATION) {
-          recorder.stopRecording();
-        }
-      }
-
-      if (system_uptime < INITIAL_RECORDING_DURATION &&
-          !recorder.isRecording()) {
-        recorder.startRecording();
+    // Отправка обработанного кадра в ветку processed с исходным PTS камеры:
+    // YOLO может быть медленнее камеры, тогда в файле будут пропуски по PTS,
+    // но не ускоренное воспроизведение.
+    if (pipeline_capture && recorder.isRunning() &&
+        recorder.streamsEnabled() && !processed.empty()) {
+      if (!recorder.pushProcessedFrame(processed, frame_pts)) {
+        logMsg("❌ Не удалось записать обработанный кадр: " +
+               recorder.lastError());
       }
     }
 
-    // Ограничение FPS и фоновая очистка 
+    // Ограничение FPS и фоновая очистка
     auto loop_end = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                        loop_end - loop_start)
@@ -246,6 +268,16 @@ void video_processing_thread(TgBot::Bot* bot,
         3600) {            // Раз в час
       cleanupOldVideos();  // внутри проверяется флаг
       last_cleanup = loop_end;
+    }
+  }
+
+  if (pipeline_capture && recorder.isRunning()) {
+    if (recorder.stop()) {
+      logMsg("⏹️ Запись остановлена, файлы: " +
+             recorder.currentSessionDirectory());
+    } else {
+      logMsg("⚠️ Остановка записи завершилась с предупреждением: " +
+             recorder.lastError());
     }
   }
 }
