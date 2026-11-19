@@ -767,10 +767,14 @@ private:
         const auto segment_ns =
             static_cast<std::uint64_t>(config_.segment_duration.count()) *
             GST_SECOND;
+        // async=false у файловых sink-ов: живой рекордер не должен ждать
+        // preroll. Иначе splitmuxsink processed-ветки ждёт первый буфер от
+        // appsrc, а приложение ждёт кадр из appsink - оба стоят, пайплайн не
+        // выходит в PLAYING, файлы остаются нулевого размера.
         const std::string sink_properties =
             config_.synchronous_files
-                ? " sink-properties=\"properties,o-sync=true\""
-                : "";
+                ? " sink-properties=\"properties,o-sync=true,async=false\""
+                : " sink-properties=\"properties,async=false\"";
         const std::string mux_common =
             " max-size-time=" + std::to_string(segment_ns) +
             " max-size-bytes=0 send-keyframe-requests=true async-finalize=true "
@@ -839,7 +843,7 @@ private:
 
             << "camera_tee. ! queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 leaky=downstream ! "
             << "videoconvert ! video/x-raw,format=BGR ! "
-            << "appsink name=camera_sink emit-signals=false sync=false max-buffers=2 drop=true wait-on-eos=false "
+            << "appsink name=camera_sink emit-signals=false sync=false async=false max-buffers=2 drop=true wait-on-eos=false "
 
             << "appsrc name=processed_src is-live=true format=time do-timestamp=false "
             << "block=false max-bytes=" << config_.processed_appsrc_max_bytes
@@ -940,6 +944,29 @@ private:
             stopInternal(false);
             return false;
         }
+
+        // Ждём фактического перехода. Без этой проверки preroll-stall выглядел
+        // как успешно начатая запись с файлами нулевого размера.
+        GstState reached = GST_STATE_VOID_PENDING;
+        const GstStateChangeReturn wait_result =
+            gst_element_get_state(pipeline, &reached, nullptr, 5 * GST_SECOND);
+        if (wait_result == GST_STATE_CHANGE_FAILURE) {
+            setError("Пайплайн GStreamer не перешёл в рабочее состояние "
+                     "(ошибка элемента). Смотрите предупреждения GStreamer выше.");
+            stopInternal(false);
+            return false;
+        }
+        if (wait_result == GST_STATE_CHANGE_ASYNC) {
+            setError("Пайплайн не вышел в PLAYING за 5 с: не завершён preroll, "
+                     "то есть камера или muxer не получают данных. Проверьте "
+                     "gst-launch-тест с этой камерой и отключите звук "
+                     "(JETBOT_MIC=), если он включён.");
+            stopInternal(false);
+            return false;
+        }
+
+        logMsg(std::string("Запись: пайплайн в состоянии ") +
+               gst_element_state_get_name(reached));
 
         // Применяем текущее состояние задвижек (по умолчанию - открыты).
         (void)setStreamsEnabled(streams_enabled_.load());

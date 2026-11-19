@@ -134,16 +134,33 @@ export COCO_NAMES_PATH=$HOME/jetbot/coco.names
 
 ## Диагностика: файлы нулевого размера
 
+Старт записи теперь проверяет, что пайплайн реально дошёл до PLAYING
+(`gst_element_get_state`, 5 с). Если preroll не завершён, `start()` возвращает
+ошибку, в лог пишется причина, и бот продолжает работу через OpenCV-захват —
+пустые «сессии» больше не считаются записью.
+
 Если `camera_000000.mkv` / `processed_000000.mkv` есть, но 0 байт:
 
 1. Ищите в логе строку `Запись: первый кадр камеры WxH`. Если её нет — пайплайн
    не выдал ни одного кадра, и обычно виновата аудиоветка:
    `JETBOT_MIC=` (пусто) и перезапуск покажут, так ли это.
-2. Проверьте микрофон отдельно: `arecord -D "$JETBOT_MIC" -f S16_LE -r 48000 -c 1 -d 5 /tmp/mic.wav`.
-3. Проверьте камеру отдельно: `v4l2-ctl -d /dev/videoN --list-formats-ext`,
-   затем быстрый тест
-   `gst-launch-1.0 v4l2src device=/dev/videoN num-buffers=30 ! videoconvert ! fakesink`.
-4. `Can't record audio fast enough` в логе — ALSA не успевает отдавать буферы;
+2. `Пайплайн не вышел в PLAYING за 5 с` — preroll не завершён: камера или
+   muxer не получают данных. Смотрите пункт 3 и тест из пункта 4.
+3. `10 с без кадров от пайплайна` — пайплайн в PLAYING, но appsink пуст;
+   проверьте тот же `gst-launch`-тест.
+4. Проверьте камеру отдельно:
+
+   ```bash
+   v4l2-ctl -d /dev/videoN --list-formats-ext
+   gst-launch-1.0 -v v4l2src device=/dev/videoN num-buffers=50 ! \
+     videoconvert ! videoscale ! videorate ! \
+     video/x-raw,format=I420,width=640,height=480,framerate=25/1 ! \
+     x264enc tune=zerolatency speed-preset=ultrafast bitrate=900 ! h264parse ! \
+     matroskamux streamable=true ! filesink location=/tmp/t.mkv
+   ```
+
+5. Проверьте микрофон отдельно: `arecord -D "$JETBOT_MIC" -f S16_LE -r 48000 -c 1 -d 5 /tmp/mic.wav`.
+6. `Can't record audio fast enough` в логе — ALSA не успевает отдавать буферы;
    такая ветка тоже ведёт к простою muxer-а, лечится сменой устройства
    (`plughw:X,Y` вместо `hw:X,Y`) или отключением звука.
 

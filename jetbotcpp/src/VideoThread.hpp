@@ -152,6 +152,11 @@ void video_processing_thread(TgBot::Bot* bot,
 
   auto last_frame_time = std::chrono::steady_clock::now();
 
+  // Диагностика «запись идёт, а файлы пустые»: если пайплайн не отдаёт кадры,
+  // скажем об этом прямо, а не будем молча крутить цикл.
+  bool warned_no_frames = false;
+  auto capture_watch_start = std::chrono::steady_clock::now();
+
   FrameBuffer buffer;
 
   while (running) {
@@ -168,10 +173,19 @@ void video_processing_thread(TgBot::Bot* bot,
           logMsg("❌ Ошибка захвата/записи: " + recorder.lastError());
           break;
         }
+        if (!warned_no_frames &&
+            std::chrono::steady_clock::now() - capture_watch_start >
+                std::chrono::seconds(10)) {
+          warned_no_frames = true;
+          logMsg("❌ 10 с без кадров от пайплайна: камера не отдаёт видео. "
+                 "Проверьте gst-launch-тест этой камеры; если включён звук "
+                 "(JETBOT_MIC) — попробуйте отключить его.");
+        }
         continue; // таймаут ожидания кадра, пробуем снова
       }
       frame = std::move(packet.image);
       frame_pts = packet.pts_ns;
+      capture_watch_start = std::chrono::steady_clock::now();
       if (frame.empty()) {
         continue;
       }
