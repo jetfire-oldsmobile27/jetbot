@@ -105,13 +105,13 @@ std::string currentMuxFile(GstElement* mux) {
     return result;
 }
 
-// Ищет V4L2-устройство камеры по возможностям, а не по номеру: после
+// Ищет V4L2-устройство камеры через GstDeviceMonitor, а не по номеру: после
 // перезагрузки камера может оказаться /dev/video2 вместо /dev/video0.
-// preferred используется, только если этот узел существует и поддерживает
-// запрошенные caps; иначе берётся первое подходящее устройство.
+// Формат больше не навязывается (масштаб/частота приводятся в пайплайне),
+// поэтому достаточно любого устройства, отдающего video/x-raw.
+// preferred используется, только если этот узел существует как источник видео.
 // Требует уже выполненного gst_init().
-std::string findAutoCameraDevice(int width, int height, int fps,
-                                 const std::string& preferred,
+std::string findAutoCameraDevice(const std::string& preferred,
                                  std::string& diagnostics) {
     GstDeviceMonitor* monitor = gst_device_monitor_new();
 
@@ -131,9 +131,7 @@ std::string findAutoCameraDevice(int width, int height, int fps,
         return {};
     }
 
-    GstCaps* wanted = gst_caps_new_simple(
-        "video/x-raw", "width", G_TYPE_INT, width, "height", G_TYPE_INT, height,
-        "framerate", GST_TYPE_FRACTION, fps, 1, nullptr);
+    GstCaps* wanted = gst_caps_new_empty_simple("video/x-raw");
 
     std::string chosen;
     std::string fallback;
@@ -338,6 +336,18 @@ public:
 
         const int width = static_cast<int>(GST_VIDEO_INFO_WIDTH(&info));
         const int height = static_cast<int>(GST_VIDEO_INFO_HEIGHT(&info));
+        bool announce = false;
+        {
+            std::lock_guard lock(state_mutex_);
+            if (!logged_first_frame_) {
+                logged_first_frame_ = true;
+                announce = true;
+            }
+        }
+        if (announce) {
+            logMsg("Запись: первый кадр камеры " + std::to_string(width) + "x" +
+                   std::to_string(height));
+        }
         const auto* data =
             static_cast<const std::uint8_t*>(GST_VIDEO_FRAME_PLANE_DATA(&mapped, 0));
         const int stride = GST_VIDEO_FRAME_PLANE_STRIDE(&mapped, 0);
@@ -617,6 +627,8 @@ private:
             {"queue", "gstreamer1.0-plugins-base"},
             {"valve", "gstreamer1.0-plugins-base"},
             {"videoconvert", "gstreamer1.0-plugins-base"},
+            {"videoscale", "gstreamer1.0-plugins-base"},
+            {"videorate", "gstreamer1.0-plugins-base"},
             {"appsink", "gstreamer1.0-plugins-base"},
             {"appsrc", "gstreamer1.0-plugins-base"},
             {"filesink", "gstreamer1.0-plugins-base"},
@@ -680,6 +692,7 @@ private:
             last_error_.clear();
             streams_enabled_ = true;
             last_processed_pts_ = GST_CLOCK_TIME_NONE;
+            logged_first_frame_ = false;
         }
 
         try {
@@ -740,7 +753,6 @@ private:
         if (camera_device.empty() || camera_device == "auto") {
             std::string diagnostics;
             camera_device = findAutoCameraDevice(
-                config_.width, config_.height, config_.fps,
                 config_.camera_preferred_device, diagnostics);
             if (camera_device.empty()) {
                 setError("Камера не найдена: " + diagnostics +
@@ -762,7 +774,11 @@ private:
         launch
             << "v4l2src device=" << gstQuote(camera_device)
             << " do-timestamp=true ! "
-            << "video/x-raw,width=" << config_.width
+            // Камера не обязана поддерживать ровно width/height/fps: принимаем
+            // её нативные caps и приводим формат/размер/частоту здесь, иначе
+            // v4l2src падает с not-negotiated.
+            << "videoconvert ! videoscale ! videorate ! "
+            << "video/x-raw,format=I420,width=" << config_.width
             << ",height=" << config_.height
             << ",framerate=" << config_.fps << "/1 ! "
             << "tee name=camera_tee "
@@ -887,12 +903,14 @@ private:
         GstHandle pipeline;
         GstHandle processed_src;
         GstHandle bus;
+        bool already_failed = false;
         {
             std::lock_guard lock(state_mutex_);
             running_ = false;
             if (!pipeline_) {
                 return !failed_;
             }
+            already_failed = failed_;
             pipeline = gstRef(GST_OBJECT(gst_object_ref(pipeline_)));
             if (processed_src_) {
                 processed_src =
@@ -905,7 +923,9 @@ private:
 
         bool ok = true;
 
-        if (send_eos) {
+        // Если пайплайн уже сломался, EOS ждать бессмысленно: он не придёт, и
+        // остановка висела бы 12 секунд. Просто переводим в NULL.
+        if (send_eos && !already_failed) {
             if (processed_src) {
                 if (gst_app_src_end_of_stream(GST_APP_SRC(processed_src.get())) !=
                     GST_FLOW_OK) {
@@ -996,6 +1016,7 @@ private:
 
     RecordingConfig config_;
     bool audio_requested_{false};
+    bool logged_first_frame_{false};
 
     mutable std::mutex control_mutex_; // сериализует start/stop
     mutable std::mutex state_mutex_;   // короткие критические секции
