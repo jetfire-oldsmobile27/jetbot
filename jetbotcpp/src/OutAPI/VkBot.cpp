@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <opencv2/opencv.hpp>
 #include <sstream>
 
 #include "Globals.hpp"

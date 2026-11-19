@@ -130,7 +130,7 @@ public:
         }
     }
 
-    ~Impl() { stop(); }
+    ~Impl() { (void)stop(); }
 
     bool start() {
         std::lock_guard control(control_mutex_);
@@ -725,7 +725,7 @@ private:
         }
 
         // Применяем текущее состояние задвижек (по умолчанию - открыты).
-        setStreamsEnabled(streams_enabled_.load());
+        (void)setStreamsEnabled(streams_enabled_.load());
         running_ = true;
         return true;
     }
