@@ -163,9 +163,8 @@ int main(int argc, char *argv[]) {
   if (const char *microphone_device = std::getenv("JETBOT_MIC")) {
     recording_config.microphone_device = microphone_device;
   } else {
-    logMsg("Запись: микрофон не задан, используется ALSA-устройство \"default\". "
-           "Для USB-микрофона задайте JETBOT_MIC=hw:<card>,<device> "
-           "(см. arecord -l).");
+    logMsg("Запись: JETBOT_MIC не задан — видео пишется без звука. Для аудио "
+           "задайте JETBOT_MIC=hw:<card>,<device> (см. arecord -l).");
   }
   if (const char *encoder_chain = std::getenv("JETBOT_ENCODER_CHAIN")) {
     recording_config.video_encoder_chain = encoder_chain;

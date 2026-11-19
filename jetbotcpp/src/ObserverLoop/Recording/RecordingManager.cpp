@@ -89,6 +89,48 @@ bool haveElement(const char* name) {
     return true;
 }
 
+// Проверяет, что ALSA-устройство реально отдаёт данные: «открылось» и
+// «работает» - разные вещи. Без этой пробы зависший alsasrc блокирует
+// preroll всего пайплайна, и файлы остаются нулевого размера.
+// Требует уже выполненного gst_init().
+bool probeAudioDevice(const std::string& device, int timeout_ms) {
+    const std::string description =
+        "alsasrc device=" + gstQuote(device) +
+        " num-buffers=4 ! audioconvert ! audioresample ! "
+        "audio/x-raw,rate=48000,channels=1 ! fakesink sync=false";
+
+    GError* parse_error = nullptr;
+    GstElement* pipeline = gst_parse_launch(description.c_str(), &parse_error);
+    if (parse_error != nullptr) {
+        g_error_free(parse_error);
+        if (pipeline != nullptr) {
+            gst_object_unref(pipeline);
+        }
+        return false;
+    }
+    if (pipeline == nullptr) {
+        return false;
+    }
+
+    bool ok = false;
+    if (gst_element_set_state(pipeline, GST_STATE_PLAYING) !=
+        GST_STATE_CHANGE_FAILURE) {
+        GstBus* bus = gst_element_get_bus(pipeline);
+        GstMessage* message = gst_bus_timed_pop_filtered(
+            bus, static_cast<GstClockTime>(timeout_ms) * GST_MSECOND,
+            static_cast<GstMessageType>(GST_MESSAGE_EOS | GST_MESSAGE_ERROR));
+        ok = (message != nullptr) && GST_MESSAGE_TYPE(message) == GST_MESSAGE_EOS;
+        if (message != nullptr) {
+            gst_message_unref(message);
+        }
+        gst_object_unref(bus);
+    }
+
+    gst_element_set_state(pipeline, GST_STATE_NULL);
+    gst_object_unref(pipeline);
+    return ok;
+}
+
 const char* streamPrefix(VideoStream stream) {
     return stream == VideoStream::Camera ? "camera" : "processed";
 }
@@ -253,6 +295,12 @@ public:
         if (with_audio && !checkAudioElements()) {
             logMsg("⚠️ GStreamer: нет элементов для звука (alsasrc/opusenc). "
                    "Запись пойдёт без аудиодорожки.");
+            with_audio = false;
+        }
+        if (with_audio && !probeAudioDevice(config_.microphone_device, 3000)) {
+            logMsg("⚠️ ALSA-устройство \"" + config_.microphone_device +
+                   "\" не отдаёт данные (проверьте arecord -l и JETBOT_MIC). "
+                   "Запись пойдёт без звука.");
             with_audio = false;
         }
 

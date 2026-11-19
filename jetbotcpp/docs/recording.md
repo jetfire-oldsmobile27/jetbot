@@ -102,7 +102,7 @@ OpenCV-путь (режим `--no-recording` и откат при неудачн
 |---|---|---|
 | `VK_ACCESS_TOKEN`, `VK_GROUP_ID` | да | VK-бот |
 | `LOCAL_MACHINE_IP`, `LOCAL_MACHINE_PORT` | для `/power` | управление локальной машиной |
-| `JETBOT_MIC` | рекомендуется | ALSA-устройство микрофона, `arecord -l` |
+| `JETBOT_MIC` | для аудио | ALSA-устройство микрофона (`arecord -l`). Без него запись без звука |
 | `CAM_INDEX` | нет | предпочтение при автопоиске (`/dev/video<N>`), не жёсткое требование |
 | `JETBOT_CAMERA` | нет | жёстко задать узел камеры, приоритетнее `CAM_INDEX` |
 | `ONNX_MODEL_PATH`, `COCO_NAMES_PATH` | если модели не рядом с бинарником | модель/классы YOLO; при отсутствии берутся `yolov10n.onnx` и `coco.names` из каталога бинарника |
@@ -121,12 +121,31 @@ export ONNX_MODEL_PATH=$HOME/jetbot/yolov10n.onnx
 export COCO_NAMES_PATH=$HOME/jetbot/coco.names
 ```
 
-Если `JETBOT_MIC` не задан, используется ALSA-устройство `default`, и в лог
-пишется подсказка.
+Аудио включается **только** если задан `JETBOT_MIC`. По умолчанию
+`microphone_device` пустой, и запись идёт без звуковой дорожки: это осознанно,
+потому что зависший `alsasrc` (устройство открылось, но не отдаёт данные)
+блокирует preroll всего пайплайна — файлы создаются, но остаются нулевого
+размера, и не пишется даже видео.
 
-Отсутствие микрофона не лишает видеозаписи: если аудиоветка не поднялась,
-`RecordingManager::start()` повторяет запуск без звука и пишет об этом в лог.
+Перед сборкой пайплайна устройство проверяется пробой
+(`alsasrc ! audioconvert ! audioresample ! fakesink`, несколько буферов). Если
+проба не прошла, запись стартует без звука и в лог пишется причина.
 Текущее состояние видно в `/status` («Микрофон: …»).
+
+## Диагностика: файлы нулевого размера
+
+Если `camera_000000.mkv` / `processed_000000.mkv` есть, но 0 байт:
+
+1. Ищите в логе строку `Запись: первый кадр камеры WxH`. Если её нет — пайплайн
+   не выдал ни одного кадра, и обычно виновата аудиоветка:
+   `JETBOT_MIC=` (пусто) и перезапуск покажут, так ли это.
+2. Проверьте микрофон отдельно: `arecord -D "$JETBOT_MIC" -f S16_LE -r 48000 -c 1 -d 5 /tmp/mic.wav`.
+3. Проверьте камеру отдельно: `v4l2-ctl -d /dev/videoN --list-formats-ext`,
+   затем быстрый тест
+   `gst-launch-1.0 v4l2src device=/dev/videoN num-buffers=30 ! videoconvert ! fakesink`.
+4. `Can't record audio fast enough` в логе — ALSA не успевает отдавать буферы;
+   такая ветка тоже ведёт к простою muxer-а, лечится сменой устройства
+   (`plughw:X,Y` вместо `hw:X,Y`) или отключением звука.
 
 ## Производительность на Orange Pi Zero 2W
 
@@ -147,8 +166,8 @@ processed), плюс YOLO. `mpph264enc` — только Rockchip, `JETBOT_ENCOD
 При старте пайплайн проверяет фабрики элементов и сообщает список отсутствующих:
 
 ```bash
-for e in v4l2src tee queue valve videoconvert appsink appsrc splitmuxsink \
-         matroskamux filesink h264parse x264enc \
+for e in v4l2src tee queue valve videoconvert videoscale videorate \
+         appsink appsrc splitmuxsink matroskamux filesink h264parse x264enc \
          alsasrc audioconvert audioresample opusenc; do
   gst-inspect-1.0 "$e" >/dev/null || echo "MISSING: $e"
 done
