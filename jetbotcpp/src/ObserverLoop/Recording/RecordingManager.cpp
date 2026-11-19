@@ -610,35 +610,60 @@ public:
 
 private:
     bool checkVideoElements() {
-        const std::vector<std::string> required = {
-            "v4l2src", "tee",     "queue", "valve",         "videoconvert",
-            "appsink", "appsrc",  "splitmuxsink", "matroskamux", "filesink",
-            "h264parse"};
+        // Элемент -> пакет, в котором он лежит (Debian/Armbian).
+        std::vector<std::pair<std::string, std::string>> required = {
+            {"v4l2src", "gstreamer1.0-plugins-good"},
+            {"tee", "gstreamer1.0-plugins-base"},
+            {"queue", "gstreamer1.0-plugins-base"},
+            {"valve", "gstreamer1.0-plugins-base"},
+            {"videoconvert", "gstreamer1.0-plugins-base"},
+            {"appsink", "gstreamer1.0-plugins-base"},
+            {"appsrc", "gstreamer1.0-plugins-base"},
+            {"filesink", "gstreamer1.0-plugins-base"},
+            {"splitmuxsink", "gstreamer1.0-plugins-good"},
+            {"matroskamux", "gstreamer1.0-plugins-good"},
+            {"h264parse", "gstreamer1.0-plugins-bad"},
+        };
+        // x264enc обязателен только для цепочки по умолчанию: при своём
+        // JETBOT_ENCODER_CHAIN (например, mpph264enc) он не нужен.
+        if (config_.video_encoder_chain.find("x264enc") != std::string::npos) {
+            required.emplace_back("x264enc", "gstreamer1.0-plugins-ugly");
+        }
+
         std::string missing;
-        for (const auto& element : required) {
-            if (!haveElement(element.c_str())) {
-                missing += (missing.empty() ? "" : ", ") + element;
+        std::string packages;
+        for (const auto& [element, package] : required) {
+            if (haveElement(element.c_str())) {
+                continue;
+            }
+            missing += (missing.empty() ? "" : ", ") + element +
+                       " (" + package + ")";
+            if (packages.find(package) == std::string::npos) {
+                packages += (packages.empty() ? "" : " ") + package;
             }
         }
-        // Цепочка энкодера по умолчанию собирается на x264enc.
-        if (config_.video_encoder_chain.find("x264enc") != std::string::npos &&
-            !haveElement("x264enc")) {
-            missing += (missing.empty() ? "" : ", ") + std::string("x264enc");
-        }
+
         if (!missing.empty()) {
             setError("Отсутствуют плагины GStreamer: " + missing +
-                     ". Установите gstreamer1.0-plugins-good/bad/ugly и "
-                     "gstreamer1.0-libav (или задайте JETBOT_ENCODER_CHAIN).");
+                     ". Установите: sudo apt install " + packages +
+                     ", либо задайте JETBOT_ENCODER_CHAIN с имеющимся "
+                     "энкодером.");
             return false;
         }
         return true;
     }
 
     bool checkAudioElements() {
-        const std::vector<std::string> required = {"alsasrc", "audioconvert",
-                                                   "audioresample", "opusenc"};
-        for (const auto& element : required) {
+        const std::vector<std::pair<std::string, std::string>> required = {
+            {"alsasrc", "gstreamer1.0-alsa"},
+            {"audioconvert", "gstreamer1.0-plugins-base"},
+            {"audioresample", "gstreamer1.0-plugins-base"},
+            {"opusenc", "gstreamer1.0-plugins-base"},
+        };
+        for (const auto& [element, package] : required) {
             if (!haveElement(element.c_str())) {
+                logMsg("⚠️ Нет элемента GStreamer " + element + " (пакет " +
+                       package + "): запись пойдёт без звука.");
                 return false;
             }
         }
