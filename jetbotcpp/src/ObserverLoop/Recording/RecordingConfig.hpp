@@ -9,8 +9,14 @@ namespace ObserverLoop::Recording {
 struct RecordingConfig {
     std::filesystem::path output_dir{"videos"};
 
-    // Явное устройство V4L2. По умолчанию подставляется /dev/video<CAM_INDEX>.
+    // Явное устройство V4L2. Значение "auto" включает автопоиск по caps
+    // (GstDeviceMonitor), пустая строка равнозначна "auto".
     std::string camera_device{"/dev/video0"};
+
+    // Необязательное предпочтение при автопоиске: узел используется, только
+    // если он существует и поддерживает запрошенные width/height/fps. Удобно,
+    // когда CAM_INDEX после перезагрузки меняется.
+    std::string camera_preferred_device{};
 
     // Явное устройство ALSA (например "hw:1,0" или "plughw:1,0").
     // Пустая строка = запись видео без звука: отсутствие микрофона не должно

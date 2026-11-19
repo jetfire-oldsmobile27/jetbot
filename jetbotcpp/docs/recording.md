@@ -64,15 +64,45 @@ $HOME/jetbot/video/
   самые старые кадры processed;
 - raw-ветка не ограничена и пишется с частотой камеры.
 
-## Запуск и настройка
+## Выбор камеры
+
+По умолчанию (`camera_device = "auto"`) устройство ищется через
+`GstDeviceMonitor` по возможностям: предпочитается V4L2-узел, чьи caps
+пересекаются с `width/height/fps`, иначе берётся первый V4L2-источник. Это
+закрывает случай, когда после перезагрузки камера оказалась `/dev/video2`
+вместо `/dev/video0`.
+
+Приоритет настройки: `JETBOT_CAMERA` (полный путь, жёстко) → `CAM_INDEX`
+(предпочтение: принимается, только если узел существует и поддерживает
+запрошенные `width/height/fps`) → автопоиск по caps. Если камера не найдена, в
+лог попадает список найденных V4L2-устройств и подсказка задать `JETBOT_CAMERA`.
+
+OpenCV-путь (режим `--no-recording` и откат при неудачном старте записи)
+перебирает индексы 0…9, как и раньше.
+
+## Переменные окружения
+
+| Переменная | Обязательна | Назначение |
+|---|---|---|
+| `VK_ACCESS_TOKEN`, `VK_GROUP_ID` | да | VK-бот |
+| `LOCAL_MACHINE_IP`, `LOCAL_MACHINE_PORT` | для `/power` | управление локальной машиной |
+| `JETBOT_MIC` | рекомендуется | ALSA-устройство микрофона, `arecord -l` |
+| `CAM_INDEX` | нет | предпочтение при автопоиске (`/dev/video<N>`), не жёсткое требование |
+| `JETBOT_CAMERA` | нет | жёстко задать узел камеры, приоритетнее `CAM_INDEX` |
+| `ONNX_MODEL_PATH`, `COCO_NAMES_PATH` | если модели не рядом с бинарником | модель/классы YOLO; при отсутствии берутся `yolov10n.onnx` и `coco.names` из каталога бинарника |
+| `JETBOT_ENCODER_CHAIN` | на SoC с аппаратным H.264 | своя цепочка энкодера вместо `x264enc` |
+| `OLLAMA_IP` | для `/ask` | сервер распознавания |
+| `TG_API_TOKEN` | нет | Telegram (обработчики сейчас закомментированы) |
+| `HOME` | да | каталог записей `$HOME/jetbot/video` |
+
+Пример:
 
 ```bash
-export JETBOT_CAMERA=/dev/video0          # по умолчанию /dev/video<CAM_INDEX>
-export JETBOT_MIC=hw:1,0                  # arecord -l покажет card/device
-# только при наличии аппаратного энкодера:
-# export JETBOT_ENCODER_CHAIN="videoconvert ! video/x-raw,format=NV12 ! \
-#   mpph264enc ! h264parse config-interval=-1 ! \
-#   video/x-h264,stream-format=avc,alignment=au"
+export VK_ACCESS_TOKEN=...  VK_GROUP_ID=...
+export LOCAL_MACHINE_IP=192.168.31.149 LOCAL_MACHINE_PORT=8083
+export JETBOT_MIC=hw:1,0                       # arecord -l
+export ONNX_MODEL_PATH=$HOME/jetbot/yolov10n.onnx
+export COCO_NAMES_PATH=$HOME/jetbot/coco.names
 ```
 
 Если `JETBOT_MIC` не задан, используется ALSA-устройство `default`, и в лог
@@ -81,6 +111,20 @@ export JETBOT_MIC=hw:1,0                  # arecord -l покажет card/devic
 Отсутствие микрофона не лишает видеозаписи: если аудиоветка не поднялась,
 `RecordingManager::start()` повторяет запуск без звука и пишет об этом в лог.
 Текущее состояние видно в `/status` («Микрофон: …»).
+
+## Производительность на Orange Pi Zero 2W
+
+SoC H618 не имеет доступного аппаратного H.264-энкодера в mainline, поэтому
+`x264enc` работает software, и таких энкодеров в пайплайне два (raw и
+processed), плюс YOLO. `mpph264enc` — только Rockchip, `JETBOT_ENCODER_CHAIN` на
+этой плате не поможет.
+
+Если не хватает CPU:
+- снизить `RecordingConfig::fps`/`width`/`height` и `video_bitrate_kbps`;
+- запустить без детекции (`--no-detection`): processed-ветка будет без
+  разметки, но кодирование останется;
+- запустить без записи (`--no-recording`) — тогда работает прежний
+  OpenCV-захват и фото/статус.
 
 ## Обязательные элементы GStreamer
 

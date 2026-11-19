@@ -148,12 +148,18 @@ int main(int argc, char *argv[]) {
   recording_config.fps = FPS;
   recording_config.segment_duration = std::chrono::seconds(15);
   recording_config.synchronous_files = true;
-  // Тот же индекс камеры, что использует StartupManager (CAM_INDEX).
-  recording_config.camera_device = "/dev/video" + std::to_string(CAMERA_INDEX);
-
+  // Камера для записи: по умолчанию ищем устройство по возможностям
+  // (GstDeviceMonitor), потому что /dev/videoN после перезагрузки может
+  // смениться. JETBOT_CAMERA задаёт узел жёстко, а CAM_INDEX — лишь
+  // предпочтение: он принимается, только если поддерживает 640x480@25.
+  recording_config.camera_device = "auto";
+  if (const char *cam_index = std::getenv("CAM_INDEX")) {
+    recording_config.camera_preferred_device = "/dev/video" + std::string(cam_index);
+  }
   if (const char *camera_device = std::getenv("JETBOT_CAMERA")) {
     recording_config.camera_device = camera_device;
   }
+
   if (const char *microphone_device = std::getenv("JETBOT_MIC")) {
     recording_config.microphone_device = microphone_device;
   } else {

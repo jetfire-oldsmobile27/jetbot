@@ -105,6 +105,113 @@ std::string currentMuxFile(GstElement* mux) {
     return result;
 }
 
+// Ищет V4L2-устройство камеры по возможностям, а не по номеру: после
+// перезагрузки камера может оказаться /dev/video2 вместо /dev/video0.
+// preferred используется, только если этот узел существует и поддерживает
+// запрошенные caps; иначе берётся первое подходящее устройство.
+// Требует уже выполненного gst_init().
+std::string findAutoCameraDevice(int width, int height, int fps,
+                                 const std::string& preferred,
+                                 std::string& diagnostics) {
+    GstDeviceMonitor* monitor = gst_device_monitor_new();
+
+    GstCaps* filter_caps = gst_caps_new_empty_simple("video/x-raw");
+    const gboolean filter_ok =
+        gst_device_monitor_add_filter(monitor, "Video/Source", filter_caps);
+    gst_caps_unref(filter_caps);
+    if (!filter_ok) {
+        gst_object_unref(monitor);
+        diagnostics = "не удалось добавить фильтр Video/Source";
+        return {};
+    }
+
+    if (!gst_device_monitor_start(monitor)) {
+        gst_object_unref(monitor);
+        diagnostics = "GstDeviceMonitor не запустился";
+        return {};
+    }
+
+    GstCaps* wanted = gst_caps_new_simple(
+        "video/x-raw", "width", G_TYPE_INT, width, "height", G_TYPE_INT, height,
+        "framerate", GST_TYPE_FRACTION, fps, 1, nullptr);
+
+    std::string chosen;
+    std::string fallback;
+    std::string preferred_matching;
+    std::string preferred_any;
+
+    GList* devices = gst_device_monitor_get_devices(monitor);
+    for (GList* item = devices; item != nullptr; item = item->next) {
+        GstDevice* device = GST_DEVICE(item->data);
+        GstStructure* properties = gst_device_get_properties(device);
+
+        const gchar* api = gst_structure_get_string(properties, "device.api");
+        const gchar* path = gst_structure_get_string(properties, "device.path");
+        const bool is_v4l2 = (api == nullptr || g_strcmp0(api, "v4l2") == 0);
+
+        if (is_v4l2 && path != nullptr) {
+            const std::string node = path;
+            if (fallback.empty()) {
+                fallback = node;
+            }
+            if (!preferred.empty() && node == preferred) {
+                preferred_any = node;
+            }
+
+            GstCaps* device_caps = gst_device_get_caps(device);
+            if (device_caps != nullptr) {
+                const bool intersects = gst_caps_can_intersect(device_caps, wanted);
+                if (intersects && chosen.empty()) {
+                    chosen = node;
+                }
+                if (intersects && !preferred.empty() && node == preferred) {
+                    preferred_matching = node;
+                }
+                gst_caps_unref(device_caps);
+            }
+        }
+
+        gst_structure_free(properties);
+    }
+
+    for (GList* item = devices; item != nullptr; item = item->next) {
+        gst_object_unref(item->data);
+    }
+    g_list_free(devices);
+    gst_caps_unref(wanted);
+    gst_device_monitor_stop(monitor);
+    gst_object_unref(monitor);
+
+    if (!preferred_matching.empty()) {
+        diagnostics = "предпочтение CAM_INDEX подтверждено: " + preferred_matching;
+        return preferred_matching;
+    }
+    if (!preferred.empty() && preferred_any.empty()) {
+        diagnostics = "устройство " + preferred +
+                      " не найдено, ищем камеру по возможностям";
+    } else if (!preferred.empty() && preferred_matching.empty()) {
+        diagnostics = "устройство " + preferred +
+                      " не поддерживает запрошенный формат, ищем другую камеру";
+    }
+    if (!chosen.empty()) {
+        if (diagnostics.empty()) {
+            diagnostics = "выбрано по caps: " + chosen;
+        } else {
+            diagnostics += "; выбрано по caps: " + chosen;
+        }
+        return chosen;
+    }
+    if (!fallback.empty()) {
+        const std::string note = "caps не совпали, взято первое V4L2-устройство: " +
+                                 fallback;
+        diagnostics = diagnostics.empty() ? note : diagnostics + "; " + note;
+        return fallback;
+    }
+
+    diagnostics += "; не найдено ни одного V4L2-устройства (/dev/video*)";
+    return {};
+}
+
 } // namespace
 
 class RecordingManager::Impl {
@@ -114,8 +221,6 @@ public:
             throw std::invalid_argument("Invalid video dimensions or FPS");
         if (config_.segment_duration.count() <= 0)
             throw std::invalid_argument("segment_duration must be positive");
-        if (config_.camera_device.empty())
-            throw std::invalid_argument("camera_device must not be empty");
         if (config_.processed_queue_buffers <= 0)
             throw std::invalid_argument("processed_queue_buffers must be positive");
 
@@ -605,11 +710,32 @@ private:
             std::to_string(config_.processed_queue_buffers) +
             " max-size-bytes=0 max-size-time=0 leaky=downstream";
 
+        // Устройство камеры: явный путь или автопоиск по возможностям.
+        std::string camera_device = config_.camera_device;
+        if (camera_device.empty() || camera_device == "auto") {
+            std::string diagnostics;
+            camera_device = findAutoCameraDevice(
+                config_.width, config_.height, config_.fps,
+                config_.camera_preferred_device, diagnostics);
+            if (camera_device.empty()) {
+                setError("Камера не найдена: " + diagnostics +
+                         ". Задайте JETBOT_CAMERA=/dev/videoN или CAM_INDEX.");
+                return false;
+            }
+            logMsg("Запись: " + diagnostics);
+        } else {
+            logMsg("Запись: камера задана явно: " + camera_device);
+        }
+        {
+            std::lock_guard lock(state_mutex_);
+            active_camera_device_ = camera_device;
+        }
+
         // Valve перед энкодером: закрытая задвижка не тратит CPU на кодирование
         // и не даёт данным дойти до muxer, пока событие не записывается.
         std::ostringstream launch;
         launch
-            << "v4l2src device=" << gstQuote(config_.camera_device)
+            << "v4l2src device=" << gstQuote(camera_device)
             << " do-timestamp=true ! "
             << "video/x-raw,width=" << config_.width
             << ",height=" << config_.height
@@ -859,6 +985,7 @@ private:
     GstBus* bus_{nullptr};
 
     std::filesystem::path session_dir_;
+    std::string active_camera_device_;
     std::atomic<bool> running_{false};
     std::atomic<bool> streams_enabled_{true};
     std::atomic<bool> audio_active_{false};

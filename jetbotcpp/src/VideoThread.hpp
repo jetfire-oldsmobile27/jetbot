@@ -4,8 +4,10 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <memory>
 #include <opencv2/opencv.hpp>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -57,18 +59,57 @@ void video_processing_thread(TgBot::Bot* bot,
   std::vector<cv::String> output_layers = startup_manager.getOutputLayers();
   cv::CascadeClassifier face_cascade = startup_manager.getFaceCascade();
 
+  // После перезагрузки камера может получить другой номер, поэтому OpenCV-путь
+  // тоже перебирает индексы, а не полагается только на CAM_INDEX.
+  auto open_cv_camera = [&cap](int preferred) {
+    if (cap.open(preferred)) {
+      return preferred;
+    }
+    for (int idx = 0; idx < 10; ++idx) {
+      if (idx == preferred) {
+        continue;
+      }
+      if (cap.open(idx)) {
+        return idx;
+      }
+    }
+    return -1;
+  };
+
+  // Пути к модели: сначала env, затем файлы рядом с бинарником. Значения по
+  // умолчанию в main.cpp указывают на другую машину.
+  std::string model_path = ONNX_MODEL_PATH;
+  std::string names_path = COCO_NAMES_PATH;
+  if (!std::filesystem::exists(model_path)) {
+    const std::string local = resource_dir + "/yolov10n.onnx";
+    if (std::filesystem::exists(local)) {
+      model_path = local;
+    }
+  }
+  if (!std::filesystem::exists(names_path)) {
+    const std::string local = resource_dir + "/coco.names";
+    if (std::filesystem::exists(local)) {
+      names_path = local;
+    }
+  }
+  if (flags.detection && !std::filesystem::exists(model_path)) {
+    logMsg("⚠️ Модель детектора не найдена: " + model_path +
+           " (задайте ONNX_MODEL_PATH или положите yolov10n.onnx рядом с бинарником).");
+  }
+
   std::unique_ptr<ObserverLoop::Detection::YoloDetector> det_ptr_;
   std::expected<std::unique_ptr<ObserverLoop::Detection::YoloDetector>,
                 ObserverLoop::Detection::GenericDetectorError>
       yolo_det;
   if (flags.detection) {
-    yolo_det = ObserverLoop::Detection::YoloDetector::create(ONNX_MODEL_PATH,
-                                                             COCO_NAMES_PATH);
+    yolo_det = ObserverLoop::Detection::YoloDetector::create(model_path,
+                                                             names_path);
     if (yolo_det.has_value()) {
       det_ptr_ = std::move(*yolo_det);
       std::cout << "Detector created and moved successfully\n";
     } else {
-      std::cerr << "Failed to create YOLO detector. Detection disabled.\n";
+      std::cerr << "Failed to create YOLO detector (model: " << model_path
+                << "). Detection disabled.\n";
     }
   }
 
@@ -87,8 +128,12 @@ void video_processing_thread(TgBot::Bot* bot,
     } else {
       logMsg("❌ Не удалось запустить запись видео: " + recorder.lastError() +
              ". Работаем без записи, захват через OpenCV.");
-      if (!cap.open(CAMERA_INDEX)) {
-        logMsg("❌ Камера не открылась после отката на OpenCV.");
+      const int opened = open_cv_camera(CAMERA_INDEX);
+      if (opened < 0) {
+        logMsg("❌ Камера не открылась после отката на OpenCV (индексы 0..9).");
+      } else if (opened != CAMERA_INDEX) {
+        logMsg("OpenCV: камера открыта по индексу " + std::to_string(opened) +
+               " вместо CAM_INDEX=" + std::to_string(CAMERA_INDEX));
       }
     }
   }
@@ -132,8 +177,7 @@ void video_processing_thread(TgBot::Bot* bot,
     } else {
       // Прежний путь: OpenCV-захват (режим без записи).
       if (!cap.isOpened()) {
-        cap.open(CAMERA_INDEX);
-        if (cap.isOpened()) {
+        if (open_cv_camera(CAMERA_INDEX) >= 0) {
           cap.set(cv::CAP_PROP_FRAME_WIDTH, 640);
           cap.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
           cap.set(cv::CAP_PROP_FPS, FPS);
