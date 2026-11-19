@@ -148,6 +148,7 @@ void video_processing_thread(TgBot::Bot* bot,
   // Состояние событийной задвижки: true - сегменты пишутся. Начинаем открытой,
   // чтобы записать стартовое окно INITIAL_RECORDING_DURATION.
   bool segment_gate_open = true;
+  bool warned_no_detection = false;
 
   auto last_frame_time = std::chrono::steady_clock::now();
 
@@ -243,7 +244,17 @@ void video_processing_thread(TgBot::Bot* bot,
     // Камера и пайплайн работают всегда; задвижки valve решают, попадают ли
     // кадры в muxer-ы. Так переключение мгновенное и не рвёт сегменты.
     if (pipeline_capture) {
-      const bool always_record = unstopable_mode.load();
+      // Без детектора событий не будет, и запись по обнаружению превратилась бы
+      // в "60 секунд после старта и тишина". В этом случае пишем непрерывно.
+      const bool detection_available = static_cast<bool>(det_ptr_);
+      if (!detection_available && !unstopable_mode.load() &&
+          !warned_no_detection) {
+        warned_no_detection = true;
+        logMsg("⚠️ Детекция выключена или детектор не создан: запись по "
+               "событию невозможна, пишем непрерывно.");
+      }
+
+      const bool always_record = unstopable_mode.load() || !detection_available;
       const bool should_record =
           always_record || system_uptime <= INITIAL_RECORDING_DURATION ||
           (current_time - last_detection_time) <= RECORDING_DURATION;
