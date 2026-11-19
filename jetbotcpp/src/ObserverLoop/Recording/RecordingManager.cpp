@@ -1,5 +1,7 @@
 #include "ObserverLoop/Recording/RecordingManager.hpp"
 
+#include "Logging.hpp"
+
 #include <gst/gst.h>
 #include <gst/app/gstappsrc.h>
 #include <gst/app/gstappsink.h>
