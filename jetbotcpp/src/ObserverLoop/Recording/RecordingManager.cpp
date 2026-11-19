@@ -730,6 +730,41 @@ private:
         return true;
     }
 
+    // Логирует элементы, которые не дошли до PLAYING: сразу видно, чей preroll
+    // не завершился (muxer, sink или src).
+    void logStalledElements(GstElement* pipeline) {
+        if (pipeline == nullptr) {
+            return;
+        }
+        std::string stalled;
+        int shown = 0;
+        GstIterator* iterator = gst_bin_iterate_recurse(GST_BIN(pipeline));
+        GValue item = G_VALUE_INIT;
+        while (shown < 20 &&
+               gst_iterator_next(iterator, &item) == GST_ITERATOR_OK) {
+            GstElement* element = GST_ELEMENT(g_value_get_object(&item));
+            GstState state = GST_STATE_VOID_PENDING;
+            GstState pending = GST_STATE_VOID_PENDING;
+            gst_element_get_state(element, &state, &pending, 0);
+            if (state != GST_STATE_PLAYING ||
+                pending != GST_STATE_VOID_PENDING) {
+                stalled += " ";
+                stalled += GST_ELEMENT_NAME(element);
+                stalled += "=";
+                stalled += gst_element_state_get_name(state);
+                if (pending != GST_STATE_VOID_PENDING) {
+                    stalled += "->";
+                    stalled += gst_element_state_get_name(pending);
+                }
+                ++shown;
+            }
+            g_value_unset(&item);
+        }
+        gst_iterator_free(iterator);
+        logMsg("Запись: элементы не в PLAYING:" +
+               (stalled.empty() ? std::string(" нет") : stalled));
+    }
+
     bool startInternal(bool with_audio) {
         {
             std::lock_guard lock(state_mutex_);
@@ -945,6 +980,34 @@ private:
             return false;
         }
 
+        // Прайм-кадр: muxer processed-ветки не должен ждать данных, которые мы
+        // сами отдаём только после кадра с камеры. Иначе взаимоблокировка:
+        // pipeline ждёт буфер в muxer -> appsink молчит -> кадров нет.
+        {
+            cv::Mat primer(config_.height, config_.width, CV_8UC3,
+                           cv::Scalar(0, 0, 0));
+            const gsize primer_bytes =
+                static_cast<gsize>(primer.total() * primer.elemSize());
+            GstBuffer* primer_buffer =
+                gst_buffer_new_allocate(nullptr, primer_bytes, nullptr);
+            if (primer_buffer != nullptr) {
+                gst_buffer_fill(primer_buffer, 0, primer.data, primer_bytes);
+                GST_BUFFER_PTS(primer_buffer) = 0;
+                GST_BUFFER_DTS(primer_buffer) = GST_CLOCK_TIME_NONE;
+                GST_BUFFER_DURATION(primer_buffer) =
+                    GST_SECOND / static_cast<GstClockTime>(config_.fps);
+                const GstFlowReturn primer_flow = gst_app_src_push_buffer(
+                    GST_APP_SRC(processed_src), primer_buffer);
+                if (primer_flow != GST_FLOW_OK) {
+                    logMsg("⚠️ Прайм-кадр processed не принят: " +
+                           std::string(gst_flow_get_name(primer_flow)));
+                } else {
+                    std::lock_guard lock(state_mutex_);
+                    last_processed_pts_ = 0;
+                }
+            }
+        }
+
         // Ждём фактического перехода. Без этой проверки preroll-stall выглядел
         // как успешно начатая запись с файлами нулевого размера.
         GstState reached = GST_STATE_VOID_PENDING;
@@ -957,6 +1020,7 @@ private:
             return false;
         }
         if (wait_result == GST_STATE_CHANGE_ASYNC) {
+            logStalledElements(pipeline);
             setError("Пайплайн не вышел в PLAYING за 5 с: не завершён preroll, "
                      "то есть камера или muxer не получают данных. Проверьте "
                      "gst-launch-тест с этой камерой и отключите звук "
